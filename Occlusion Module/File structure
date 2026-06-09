@@ -1,0 +1,8 @@
+instancedepth/models/refine/
+├── pair_selection.py    # filter, IoU overlap, main/guest assignment
+├── roi_extract.py       # ROIAlign features + geometric priors
+├── relation_reason.py   # Φo MLP + Eqs. 8–9 (the refinement)
+└── occlusion_refine.py  # full module orchestrating the above
+
+instancedepth/losses/
+└── refine_losses.py     # L_obj (SigLog), L_dist (Eq.11), L_ref (Eq.12)
