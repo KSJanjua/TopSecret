@@ -1,0 +1,71 @@
+# InstanceDepth — Integrated Model
+
+Faithful reconstruction of *Instance-Level Video Depth in Groups Beyond
+Occlusions* (ICCV 2025), integrated end-to-end.
+
+## Architecture flow
+```
+RGB → SHARED DINOv2/DPT backbone → [f8,f4,f2]
+        ├─ Phase 1 HDI            → init_depth, range_logits      (§4.1)
+        ├─ Phase 2 Instance head  → masks, logits, depth_layers   (§4.2.1)
+        └─ Phase 3 Refinement     → refined_depth, d_hat          (§4.2.2)
+```
+The backbone is shared (one ViT-L, not three) — HDI is driven from precomputed
+features rather than owning its own encoder.
+
+## Package layout
+```
+instancedepth/
+├── build.py                      # factories incl. build_instance_depth_from_yaml
+├── configs/
+│   ├── instance_depth.yaml       # unified config (drives all phases)
+│   ├── hdi_vitl.yaml             # phase-wise config (legacy/standalone)
+│   └── run_config.py             # RunConfig: cross-module consistency
+├── models/
+│   ├── registry.py               # MODEL_REGISTRY, @register_model
+│   ├── instance_depth.py         # integrated InstanceDepth (registered)
+│   ├── backbone/dinov2_dpt.py
+│   ├── hdi/                       # patch_attention, range_decoder, heads, holistic_depth
+│   ├── instance/                  # pixel_decoder, transformer_decoder, query_fusion, instance_head, matcher
+│   └── refine/                    # pair_selection, roi_extract, relation_reason, occlusion_refine
+├── losses/                        # hdi_losses, instance_losses, refine_losses
+└── utils/                         # checkpoint (save/load/load_pretrained), shapes
+```
+
+## Quick start
+```python
+from instancedepth.build import build_instance_depth_from_yaml
+model = build_instance_depth_from_yaml("instancedepth/configs/instance_depth.yaml")
+
+out = model(rgb)                       # rgb (B,3,H,W), H,W divisible by 14
+out["refined_depth"]                   # (B,1,H,W) final depth
+out["init_depth"], out["pred_masks"], out["pred_depth"], out["d_hat"]
+
+# Sec. 4.3 phase schedule
+model.set_phase(1)  # train depth range (backbone + hdi)
+model.set_phase(2)  # freeze encoder, train instance head
+model.set_phase(3)  # freeze instance head, fine-tune encoder+decoder+refine
+```
+
+## Configuration system
+`RunConfig` owns every sub-config and propagates `max_depth` / `hidden_dim` so
+modules cannot drift out of tensor compatibility. Edit `instance_depth.yaml` only.
+
+## Checkpoints
+```python
+from instancedepth.utils.checkpoint import save_checkpoint, load_checkpoint, load_pretrained
+save_checkpoint("m.pth", model, optimizer, step=100, phase=2)
+load_checkpoint("m.pth", model)                                   # tolerant resume
+load_pretrained(model, da_v2_state, src_prefix="", dst_prefix="backbone.")  # external weights
+```
+
+## Verified
+Single shared backbone; end-to-end forward; tensor compatibility across all
+boundaries; partial-run flags; phase freezing + phase-2 backward; checkpoint
+round-trip (bit-identical); prefix-remapped partial weight load. (CPU sandbox
+test used ViT-S/reduced sizes; ViT-L is the default config.)
+
+## Confidence labels
+Inherited from per-phase READMEs (README_HDI / README_INSTANCE / README_REFINE).
+The integration layer itself is [Strongly Inferred] (shared backbone, phase
+schedule from §4.3) and [Reasonable Assumption] (registry/config plumbing).
