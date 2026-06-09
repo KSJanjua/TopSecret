@@ -1,0 +1,93 @@
+"""Checkpoint save/load and partial weight-loading utilities.
+
+  * save_checkpoint   : model + optimizer + meta -> .pth
+  * load_checkpoint   : restore into model (+ optimizer), tolerant of missing keys
+  * load_pretrained   : load a sub-state (e.g. a Depth-Anything-V2 encoder, or a
+                        phase-1 HDI checkpoint into the integrated model) with
+                        prefix remapping and shape filtering.
+
+Designed for the Sec. 4.3 multi-phase workflow where each phase resumes from the
+previous phase's weights.
+"""
+
+from __future__ import annotations
+
+from typing import Any, Dict, Optional
+
+import torch
+import torch.nn as nn
+
+
+def save_checkpoint(
+    path: str,
+    model: nn.Module,
+    optimizer: Optional[torch.optim.Optimizer] = None,
+    epoch: int = 0,
+    step: int = 0,
+    phase: int = 1,
+    extra: Optional[Dict[str, Any]] = None,
+) -> None:
+    ckpt: Dict[str, Any] = {
+        "model": model.state_dict(),
+        "epoch": epoch,
+        "step": step,
+        "phase": phase,
+    }
+    if optimizer is not None:
+        ckpt["optimizer"] = optimizer.state_dict()
+    if extra:
+        ckpt["extra"] = extra
+    torch.save(ckpt, path)
+
+
+def load_checkpoint(
+    path: str,
+    model: nn.Module,
+    optimizer: Optional[torch.optim.Optimizer] = None,
+    strict: bool = False,
+    map_location: str = "cpu",
+) -> Dict[str, Any]:
+    ckpt = torch.load(path, map_location=map_location, weights_only=False)
+    state = ckpt.get("model", ckpt)
+    missing, unexpected = model.load_state_dict(state, strict=strict)
+    if optimizer is not None and "optimizer" in ckpt:
+        optimizer.load_state_dict(ckpt["optimizer"])
+    return {
+        "missing": list(missing),
+        "unexpected": list(unexpected),
+        "epoch": ckpt.get("epoch", 0),
+        "step": ckpt.get("step", 0),
+        "phase": ckpt.get("phase", 1),
+    }
+
+
+@torch.no_grad()
+def load_pretrained(
+    model: nn.Module,
+    state_dict: Dict[str, torch.Tensor],
+    src_prefix: str = "",
+    dst_prefix: str = "",
+    verbose: bool = True,
+) -> Dict[str, int]:
+    """Load matching keys from `state_dict` into `model`, filtering by shape.
+
+    src_prefix/dst_prefix allow remapping (e.g. load a standalone backbone
+    state into model.backbone.*). Returns counts of loaded / skipped keys.
+    """
+    own = model.state_dict()
+    loaded, skipped = 0, 0
+    new_state = {}
+    for k, v in state_dict.items():
+        if src_prefix and not k.startswith(src_prefix):
+            continue
+        nk = dst_prefix + k[len(src_prefix):] if src_prefix else dst_prefix + k
+        if nk in own and own[nk].shape == v.shape:
+            new_state[nk] = v
+            loaded += 1
+        else:
+            skipped += 1
+    own.update(new_state)
+    model.load_state_dict(own, strict=False)
+    if verbose:
+        print(f"[load_pretrained] loaded {loaded}, skipped {skipped}")
+    return {"loaded": loaded, "skipped": skipped}
