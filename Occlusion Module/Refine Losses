@@ -1,0 +1,80 @@
+"""Refinement losses for Occlusion-Aware Depth Refinement (Eqs. 10-12).
+
+    L_obj  = SigLog(D_hat, DT_obj)                                       (Eq. 10)
+    L_dist = sum_{i,j != i} || (D_hat_i - D_hat_j)^2 - (DT_i - DT_j)^2 ||  (Eq. 11)
+    L_ref  = lambda1 * L_obj + lambda2 * L_dist                          (Eq. 12)
+
+Faithfulness notes
+-------------------
+[Paper Specified]  Eqs. 10-12 verbatim; SigLog is the scale-invariant log loss [16].
+[Strongly Inferred] L_dist is summed over the two instances within each pair
+                   (i,j = main,guest), which is exactly the occluder-occludee
+                   relation the paper describes; we average over pairs for stable
+                   scaling.
+
+Inputs
+------
+    d_hat   (P, 2)   refined depth per instance in each pair
+    dt      (P, 2)   GT depth layer per instance in each pair
+Outputs
+-------
+    dict with loss_obj, loss_dist, loss_ref (scalars)
+Complexity
+----------
+    O(P)  -- per-pair elementwise ops; trivial.
+"""
+
+from __future__ import annotations
+
+from typing import Dict
+
+import torch
+import torch.nn as nn
+
+
+class SigLogDepthLoss(nn.Module):
+    """Scale-invariant log loss on instance depth values (Eq. 10).
+
+    For a set of (pred, gt) positive depth pairs:
+        g = log(pred) - log(gt)
+        L = sqrt( mean(g^2) - vf * mean(g)^2 )
+    """
+
+    def __init__(self, variance_focus: float = 0.85, eps: float = 1e-6) -> None:
+        super().__init__()
+        self.vf = variance_focus
+        self.eps = eps
+
+    def forward(self, pred: torch.Tensor, gt: torch.Tensor) -> torch.Tensor:
+        valid = (pred > 0) & (gt > 0)
+        if valid.sum() == 0:
+            return pred.sum() * 0.0
+        p = pred[valid].clamp_min(self.eps)
+        t = gt[valid].clamp_min(self.eps)
+        g = torch.log(p) - torch.log(t)
+        loss = (g ** 2).mean() - self.vf * (g.mean() ** 2)
+        return torch.sqrt(loss.clamp_min(self.eps))
+
+
+class RefinementCriterion(nn.Module):
+    def __init__(self, lambda_obj: float = 1.0, lambda_dist: float = 0.5, variance_focus: float = 0.85) -> None:
+        super().__init__()
+        self.lambda_obj = lambda_obj
+        self.lambda_dist = lambda_dist
+        self.siglog = SigLogDepthLoss(variance_focus)
+
+    def forward(self, d_hat: torch.Tensor, dt: torch.Tensor) -> Dict[str, torch.Tensor]:
+        if d_hat.numel() == 0:
+            z = d_hat.sum() * 0.0
+            return {"loss_obj": z, "loss_dist": z, "loss_ref": z}
+
+        # L_obj: SigLog over all instances in all pairs.
+        loss_obj = self.siglog(d_hat.flatten(), dt.flatten())
+
+        # L_dist: per-pair squared-relative-depth consistency (i=main, j=guest).
+        pred_rel = (d_hat[:, 0] - d_hat[:, 1]) ** 2          # (P,)
+        gt_rel = (dt[:, 0] - dt[:, 1]) ** 2                  # (P,)
+        loss_dist = (pred_rel - gt_rel).abs().mean()
+
+        loss_ref = self.lambda_obj * loss_obj + self.lambda_dist * loss_dist
+        return {"loss_obj": loss_obj, "loss_dist": loss_dist, "loss_ref": loss_ref}
