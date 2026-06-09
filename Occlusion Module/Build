@@ -1,0 +1,132 @@
+"""Model factory: build the Holistic Depth Initialization module from a config.
+
+Usage
+-----
+    from instancedepth.build import build_hdi_from_yaml
+    model = build_hdi_from_yaml("configs/hdi_vitl.yaml")
+
+or programmatically:
+
+    from instancedepth.models.hdi.holistic_depth import HDIConfig, HolisticDepthInitialization
+    model = HolisticDepthInitialization(HDIConfig())
+"""
+
+from __future__ import annotations
+
+from typing import Any, Dict
+
+from .models.backbone.dinov2_dpt import BackboneConfig
+from .models.hdi.holistic_depth import HDIConfig, HolisticDepthInitialization
+from .models.hdi.range_decoder import RangeDecoderConfig
+
+
+def build_hdi(cfg_dict: Dict[str, Any]) -> HolisticDepthInitialization:
+    """Build the HDI model from a plain nested dict."""
+    backbone_cfg = BackboneConfig(**cfg_dict.get("backbone", {}))
+    decoder_cfg = RangeDecoderConfig(**cfg_dict.get("decoder", {}))
+
+    hdi_cfg = HDIConfig(
+        backbone=backbone_cfg,
+        decoder=decoder_cfg,
+        max_depth=cfg_dict.get("max_depth", 10.0),
+        partition_meters=cfg_dict.get("partition_meters", 2.0),
+        num_refine_steps=cfg_dict.get("num_refine_steps", 3),
+        head_hidden=cfg_dict.get("head_hidden", 128),
+    )
+    return HolisticDepthInitialization(hdi_cfg)
+
+
+def build_hdi_from_yaml(path: str) -> HolisticDepthInitialization:
+    """Build the HDI model from a YAML config file."""
+    import yaml
+
+    with open(path, "r") as f:
+        cfg_dict = yaml.safe_load(f)
+    # tuple-typed dataclass fields accept lists fine; coerce list -> tuple where needed
+    for sub in ("backbone", "decoder"):
+        if sub in cfg_dict:
+            for k, v in cfg_dict[sub].items():
+                if isinstance(v, list):
+                    cfg_dict[sub][k] = tuple(v)
+    return build_hdi(cfg_dict)
+
+
+# ---------------------------------------------------------------- instance head
+def build_instance_head(cfg_dict):
+    """Build the Instance Depth Layer head from a plain nested dict."""
+    from .models.instance.instance_head import InstanceDepthLayerHead, InstanceHeadConfig
+
+    ic = cfg_dict.get("instance", {})
+    return InstanceDepthLayerHead(InstanceHeadConfig(**ic))
+
+
+def build_instance_criterion(cfg_dict):
+    """Build the matcher + set criterion for the instance head."""
+    from .models.instance.matcher import HungarianMatcher
+    from .losses.instance_losses import InstanceSetCriterion
+
+    lc = cfg_dict.get("instance_loss", {})
+    num_classes = cfg_dict.get("instance", {}).get("num_classes", 1)
+    matcher = HungarianMatcher(
+        w_mask=lc.get("w_mask", 5.0), w_dice=lc.get("w_dice", 5.0),
+        w_class=lc.get("w_class", 2.0), w_depth=lc.get("w_depth", 1.0),
+    )
+    criterion = InstanceSetCriterion(
+        num_classes=num_classes,
+        w_mask=lc.get("w_mask", 5.0), w_dice=lc.get("w_dice", 5.0),
+        w_class=lc.get("w_class", 2.0), w_depth=lc.get("w_depth", 1.0),
+        no_object_weight=lc.get("no_object_weight", 0.1),
+        depth_beta=lc.get("depth_beta", 1.0),
+    )
+    return matcher, criterion
+
+
+# ---------------------------------------------------- occlusion refinement
+def build_refinement(cfg_dict):
+    """Build the Occlusion-Aware Depth Refinement module from a nested dict."""
+    from .models.refine.occlusion_refine import OcclusionAwareRefinement, RefineConfig
+
+    rc = cfg_dict.get("refine", {})
+    return OcclusionAwareRefinement(RefineConfig(**rc))
+
+
+def build_refinement_criterion(cfg_dict):
+    """Build the refinement loss criterion (Eqs. 10-12)."""
+    from .losses.refine_losses import RefinementCriterion
+
+    lc = cfg_dict.get("refine_loss", {})
+    return RefinementCriterion(
+        lambda_obj=lc.get("lambda_obj", 1.0),
+        lambda_dist=lc.get("lambda_dist", 0.5),
+        variance_focus=lc.get("variance_focus", 0.85),
+    )
+
+
+# ==================================================================
+# Integrated end-to-end model factory
+# ==================================================================
+def build_instance_depth(cfg_dict):
+    """Build the full integrated InstanceDepth model from a nested dict."""
+    from .configs.run_config import RunConfig
+    from .models.instance_depth import InstanceDepth
+
+    cfg = RunConfig.from_dict(cfg_dict)
+    return InstanceDepth(cfg)
+
+
+def build_instance_depth_from_yaml(path: str):
+    """Build the full integrated InstanceDepth model from a YAML config."""
+    import yaml
+
+    with open(path, "r") as f:
+        return build_instance_depth(yaml.safe_load(f))
+
+
+def build_from_registry(name: str, cfg_dict):
+    """Build any registered model by name."""
+    from .configs.run_config import RunConfig
+    from .models.registry import MODEL_REGISTRY
+    import instancedepth.models.instance_depth  # noqa: F401  ensures registration
+
+    cfg = RunConfig.from_dict(cfg_dict)
+    return MODEL_REGISTRY.get(name)(cfg)
