@@ -1,0 +1,118 @@
+"""Occlusion pair selection (Section 4.2.2, first paragraph).
+
+Pipeline per image:
+  1. Filter instances: category confidence > cls_thresh (0.9) AND
+     mask confidence > mask_thresh (0.8).
+  2. For each surviving MAIN instance, find overlapping instances with
+     mask IoU > iou_thresh (0.1).
+  3. Among overlaps, keep the one NEAREST in depth (smallest |dep_main - dep_other|)
+     as the GUEST.
+  => yields a set of (main_idx, guest_idx) pairs.
+
+Faithfulness notes
+-------------------
+[Paper Specified]  cls>0.9, mask>0.8, IoU>0.1, nearest-in-depth guest.
+[Reasonable Assumption]
+                   "mask confidence" = mean sigmoid prob inside the binarized mask;
+                   "category confidence" = max softmax prob over foreground classes.
+                   Pairs are directed (main -> guest); a pair is emitted only if a
+                   main has at least one valid overlapping instance.
+
+Inputs
+------
+    pred_logits  (N, K+1)   per-query class logits (single image)
+    pred_masks   (N, Hf, Wf) per-query mask logits
+    pred_depth   (N,)        per-query depth layer
+Outputs
+-------
+    pairs        LongTensor (P, 2) of (main_idx, guest_idx) into [0, N)
+    keep_idx     LongTensor (M,) surviving instance indices (for bookkeeping)
+
+Complexity
+----------
+    Filtering    O(N * Hf * Wf)        one pass over masks for confidences.
+    IoU matrix   O(M^2 * Hf * Wf)      pairwise mask intersections (M = survivors).
+                 In practice M is small (tens), so this is cheap vs. the backbone.
+"""
+
+from __future__ import annotations
+
+from typing import Tuple
+
+import torch
+
+
+@torch.no_grad()
+def select_occlusion_pairs(
+    pred_logits: torch.Tensor,      # (N, K+1)
+    pred_masks: torch.Tensor,       # (N, Hf, Wf)
+    pred_depth: torch.Tensor,       # (N,)
+    cls_thresh: float = 0.9,
+    mask_thresh: float = 0.8,
+    iou_thresh: float = 0.1,
+    mask_binarize: float = 0.5,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    device = pred_logits.device
+    n = pred_logits.shape[0]
+
+    # --- category confidence: max prob over foreground classes (exclude no-object) ---
+    probs = pred_logits.softmax(-1)[:, :-1]                 # (N, K)
+    cls_conf, _ = probs.max(dim=-1)                         # (N,)
+
+    # --- mask confidence: mean sigmoid prob inside the binarized mask ---
+    mp = pred_masks.sigmoid()                               # (N, Hf, Wf)
+    binm = (mp >= mask_binarize)                            # (N, Hf, Wf) bool
+    area = binm.flatten(1).sum(-1).clamp_min(1)             # (N,)
+    mask_conf = (mp * binm).flatten(1).sum(-1) / area       # (N,)
+
+    keep = (cls_conf > cls_thresh) & (mask_conf > mask_thresh)
+    keep_idx = torch.nonzero(keep, as_tuple=False).squeeze(-1)  # (M,)
+    m = keep_idx.numel()
+    if m < 2:
+        return torch.empty(0, 2, dtype=torch.long, device=device), keep_idx
+
+    # --- pairwise IoU over surviving binary masks ---
+    bm = binm[keep_idx].flatten(1).float()                  # (M, P_pix)
+    inter = bm @ bm.t()                                     # (M, M)
+    areas = bm.sum(-1)                                      # (M,)
+    union = areas[:, None] + areas[None, :] - inter
+    iou = inter / union.clamp_min(1e-6)                     # (M, M)
+    iou.fill_diagonal_(0.0)
+
+    dep = pred_depth[keep_idx]                              # (M,)
+    depth_dist = (dep[:, None] - dep[None, :]).abs()        # (M, M)
+
+    overlap = iou > iou_thresh                              # (M, M) bool
+    pairs = []
+    for a in range(m):
+        cand = torch.nonzero(overlap[a], as_tuple=False).squeeze(-1)
+        if cand.numel() == 0:
+            continue
+        guest_local = cand[torch.argmin(depth_dist[a, cand])]  # nearest in depth
+        pairs.append((int(keep_idx[a]), int(keep_idx[guest_local])))
+
+    if not pairs:
+        return torch.empty(0, 2, dtype=torch.long, device=device), keep_idx
+    return torch.tensor(pairs, dtype=torch.long, device=device), keep_idx
+
+
+@torch.no_grad()
+def masks_to_boxes(masks: torch.Tensor, binarize: float = 0.5) -> torch.Tensor:
+    """Convert (Q, Hf, Wf) mask logits to (Q, 4) xyxy boxes in feature coords.
+
+    Empty masks get a 1x1 box at the origin to keep ROIAlign well-defined.
+    Complexity: O(Q * Hf * Wf).
+    """
+    b = (masks.sigmoid() >= binarize)                       # (Q, Hf, Wf)
+    q, h, w = b.shape
+    boxes = masks.new_zeros(q, 4)
+    for i in range(q):
+        ys, xs = torch.nonzero(b[i], as_tuple=True)
+        if xs.numel() == 0:
+            boxes[i] = torch.tensor([0, 0, 1, 1], device=masks.device, dtype=masks.dtype)
+        else:
+            boxes[i] = torch.tensor(
+                [xs.min(), ys.min(), xs.max() + 1, ys.max() + 1],
+                device=masks.device, dtype=masks.dtype,
+            )
+    return boxes
