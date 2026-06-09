@@ -1,0 +1,67 @@
+# Holistic Depth Initialization config (ViT-L/14, 2-meter partitioning).
+# rd = max_depth / partition_meters = 10.0 / 2.0 = 5 ranges (Table 5 best).
+
+backbone:
+  model_name: vit_large_patch14_dinov2.lvd142m
+  out_channels: 256
+  out_strides: [8, 4, 2]
+  hook_layers: [11, 17, 23]
+  patch_size: 14
+  pretrained: true
+  freeze: false
+
+decoder:
+  channels: 256
+  patch_sizes: [4, 8, 16]   # Fig. 5: scales coarse -> fine
+  num_heads: 8
+  mlp_ratio: 4.0
+
+max_depth: 10.0
+partition_meters: 2.0
+num_refine_steps: 3
+head_hidden: 128
+
+loss:
+  siglog_variance_focus: 0.85
+  range_seg_weight: 1.0
+  siglog_weight: 1.0
+
+# ---- Instance Depth Layer Prediction (Phase 2) ----
+instance:
+  in_channels: 256
+  hidden_dim: 256
+  num_queries: 100
+  num_classes: 1          # foreground categories (e.g. person); +1 no-object internal
+  num_scales: 3
+  num_transformer_feats: 3
+  num_decoder_layers: 9
+  num_heads: 8
+  ffn_hidden: 2048
+  dropout: 0.0
+  mask_threshold: 0.5
+
+instance_loss:
+  w_mask: 5.0
+  w_dice: 5.0
+  w_class: 2.0
+  w_depth: 1.0
+  no_object_weight: 0.1
+  depth_beta: 1.0
+
+# ---- Occlusion-Aware Depth Refinement (Phase 3) ----
+refine:
+  in_channels: 256
+  geom_channels: 4        # mask(1) + coords(2) + depth(1)
+  roi_size: 7             # Hp = Wp (Mask R-CNN default)
+  sampling_ratio: 2
+  mlp_hidden: 256
+  cls_thresh: 0.9
+  mask_thresh: 0.8
+  iou_thresh: 0.1
+  mask_binarize: 0.5
+  max_depth: 10.0
+
+refine_loss:
+  lambda_obj: 1.0
+  lambda_dist: 0.5
+  variance_focus: 0.85
