@@ -1,0 +1,55 @@
+instancedepth/
+├── __init__.py
+├── build.py                          # all factory functions (model + criteria)
+│
+├── README.md                         # top-level / integration docs
+├── README_HDI.md                     # Phase 1 docs
+├── README_INSTANCE.md                # Phase 2 docs
+├── README_REFINE.md                  # Phase 3 docs
+│
+├── configs/
+│   ├── instance_depth.yaml           # unified config (drives all phases)
+│   ├── hdi_vitl.yaml                 # phase-wise config (standalone use)
+│   └── run_config.py                 # RunConfig: cross-module consistency
+│
+├── models/
+│   ├── __init__.py
+│   ├── registry.py                   # MODEL_REGISTRY, @register_model
+│   ├── instance_depth.py             # ★ integrated model (shared backbone, phases)
+│   │
+│   ├── backbone/
+│   │   ├── __init__.py
+│   │   └── dinov2_dpt.py             # DINOv2 ViT-L/14 + DPT neck → [f8,f4,f2]
+│   │
+│   ├── hdi/                          # ── Phase 1: Holistic Depth Init (§4.1) ──
+│   │   ├── __init__.py
+│   │   ├── patch_attention.py        # patch conv → FC → attention (Fig.5)
+│   │   ├── range_decoder.py          # coarse-to-fine fusion (Fig.5)
+│   │   ├── heads.py                  # S, D, Φd confidence (Eq.1)
+│   │   └── holistic_depth.py         # standalone HDI + Eq.1–4 refinement
+│   │
+│   ├── instance/                     # ── Phase 2: Instance Depth Layer (§4.2.1) ──
+│   │   ├── __init__.py
+│   │   ├── pixel_decoder.py          # FPN pixel decoder + 2D pos embed
+│   │   ├── transformer_decoder.py    # Mask2Former masked-attn decoder
+│   │   ├── query_fusion.py           # mask/depth query fusion (Fig.7)
+│   │   ├── instance_head.py          # full head → {masks, logits, depth}
+│   │   └── matcher.py                # Hungarian matching (Eqs.5–7)
+│   │
+│   └── refine/                       # ── Phase 3: Occlusion Refinement (§4.2.2) ──
+│       ├── __init__.py
+│       ├── pair_selection.py         # filter, IoU, main/guest assignment
+│       ├── roi_extract.py            # ROIAlign F_obj + geometric priors G_obj
+│       ├── relation_reason.py        # Φo MLP, Eqs.8–9
+│       └── occlusion_refine.py       # orchestrator + composite
+│
+├── losses/
+│   ├── __init__.py
+│   ├── hdi_losses.py                 # SigLog (Eq.10) + range-seg CE
+│   ├── instance_losses.py            # mask BCE+dice, class CE, depth L1
+│   └── refine_losses.py              # L_obj, L_dist, L_ref (Eqs.10–12)
+│
+└── utils/
+    ├── __init__.py
+    ├── checkpoint.py                 # save/load/load_pretrained
+    └── shapes.py                     # tensor-shape assertions
