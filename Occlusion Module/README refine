@@ -1,0 +1,39 @@
+# InstanceDepth — Phase 3: Occlusion-Aware Depth Refinement (Sec. 4.2.2)
+
+Refines instance depth layers in occluded regions by reasoning over (main, guest)
+occlusion pairs. Completes the InstanceDepth modeling pipeline.
+
+## Module map
+| File | Role | Key shapes |
+|---|---|---|
+| `models/refine/pair_selection.py` | filter (cls>0.9, mask>0.8), IoU>0.1, nearest-depth guest | pairs (P,2) |
+| `models/refine/roi_extract.py` | ROIAlign F_obj + geometric priors G_obj | F_obj (P,2,C,7,7), G_obj (P,2,4,7,7) |
+| `models/refine/relation_reason.py` | Φo MLP, Eqs. 8–9 | d_hat (P,2), e_obj (P,2) |
+| `models/refine/occlusion_refine.py` | orchestrator + composite | refined_depth (B,1,H,W) |
+| `losses/refine_losses.py` | L_obj (SigLog), L_dist (Eq.11), L_ref (Eq.12) | scalars |
+
+## Pipeline (per image)
+1. **Filter**: category conf (max foreground softmax) > 0.9 AND mask conf (mean sigmoid inside mask) > 0.8.
+2. **Overlap**: pairwise mask IoU > 0.1.
+3. **Guest**: among overlaps, the instance nearest in depth → guest; the anchor → main.
+4. **ROIAlign**: pool depth feats (F_obj) and priors (mask logits, normalized coords, init depth) per box.
+5. **Reason**: `E_obj = σ(Φo([F_obj, G_obj]))` (Eq.8); `D̂ = (E_obj·2−1)·D̄ + D_obj` (Eq.9).
+6. **Composite**: write the refined layer delta back inside each instance mask.
+
+## Losses
+- `L_obj = SigLog(D̂, DT)` (Eq.10) — scale-invariant log on refined instance depths.
+- `L_dist = mean ||(D̂_i−D̂_j)² − (DT_i−DT_j)²||` over each main/guest pair (Eq.11).
+- `L_ref = λ1·L_obj + λ2·L_dist` (Eq.12).
+
+## Computational complexity
+- Filtering: O(N·Hf·Wf). IoU matrix: O(M²·Hf·Wf), M = survivors (≪ N).
+- ROIAlign: O(P·C·Hp²·s²). Φo: O(P·(C+Cg)·Hp²·width). All ≪ DINOv2 backbone.
+
+## Confidence labels
+- **[Paper Specified]**: thresholds 0.9/0.8/0.1, nearest-depth guest, F_obj∈R^{2×C×Hp×Wp}, G_obj contents, Eqs. 8–12, ROIAlign.
+- **[Reasonable Assumption]**: Hp=Wp=7; mask/category confidence definitions; D_obj=depth layer, D̄=same as correction scale; Φo=3-layer MLP; L_dist averaged over pairs; composite via mask delta.
+
+## Verified
+6 pairs/image selected on forced overlaps; ROIAlign + Φo + all losses run; full
+backward with gradients into every refinement parameter; no-pair edge case leaves
+depth unchanged with zero loss. Random-init backbone (no weight download).
