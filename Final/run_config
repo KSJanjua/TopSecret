@@ -1,0 +1,81 @@
+"""Unified configuration system for the full InstanceDepth model.
+
+A single RunConfig owns the sub-configs for every phase and enforces
+cross-module consistency (channel widths, max_depth, hidden dims) so the
+sub-modules cannot drift out of tensor compatibility.
+
+Load order: YAML dict -> RunConfig.from_dict -> sub-dataclasses.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any, Dict
+
+from ..models.backbone.dinov2_dpt import BackboneConfig
+from ..models.hdi.holistic_depth import HDIConfig
+from ..models.hdi.range_decoder import RangeDecoderConfig
+from ..models.instance.instance_head import InstanceHeadConfig
+from ..models.refine.occlusion_refine import RefineConfig
+
+
+@dataclass
+class RunConfig:
+    backbone: BackboneConfig = field(default_factory=BackboneConfig)
+    decoder: RangeDecoderConfig = field(default_factory=RangeDecoderConfig)
+    hdi: HDIConfig = field(default_factory=HDIConfig)
+    instance: InstanceHeadConfig = field(default_factory=InstanceHeadConfig)
+    refine: RefineConfig = field(default_factory=RefineConfig)
+
+    # Global scalars propagated to every sub-config for consistency.
+    max_depth: float = 10.0
+    hidden_dim: int = 256
+
+    def __post_init__(self) -> None:
+        self._enforce_consistency()
+
+    def _enforce_consistency(self) -> None:
+        """Propagate global scalars so modules stay tensor-compatible."""
+        c = self.hidden_dim
+        self.backbone.out_channels = c
+        self.decoder.channels = c
+        # HDI wraps its own backbone+decoder copies -> keep them aligned.
+        self.hdi.backbone = self.backbone
+        self.hdi.decoder = self.decoder
+        self.hdi.max_depth = self.max_depth
+        # Instance head consumes backbone feats (in_channels) at hidden_dim.
+        self.instance.in_channels = c
+        self.instance.hidden_dim = c
+        self.instance.max_depth = self.max_depth
+        # Refinement consumes instance mask_features (in_channels) at hidden_dim.
+        self.refine.in_channels = c
+        self.refine.max_depth = self.max_depth
+
+    # ------------------------------------------------------------------ io
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> "RunConfig":
+        def _coerce(sub: Dict[str, Any]) -> Dict[str, Any]:
+            return {k: (tuple(v) if isinstance(v, list) else v) for k, v in sub.items()}
+
+        backbone = BackboneConfig(**_coerce(d.get("backbone", {})))
+        decoder = RangeDecoderConfig(**_coerce(d.get("decoder", {})))
+        hdi = HDIConfig(
+            backbone=backbone, decoder=decoder,
+            max_depth=d.get("max_depth", 10.0),
+            partition_meters=d.get("hdi", {}).get("partition_meters", d.get("partition_meters", 2.0)),
+            num_refine_steps=d.get("hdi", {}).get("num_refine_steps", d.get("num_refine_steps", 3)),
+            head_hidden=d.get("hdi", {}).get("head_hidden", 128),
+        )
+        instance = InstanceHeadConfig(**_coerce(d.get("instance", {})))
+        refine = RefineConfig(**_coerce(d.get("refine", {})))
+        return cls(
+            backbone=backbone, decoder=decoder, hdi=hdi, instance=instance, refine=refine,
+            max_depth=d.get("max_depth", 10.0), hidden_dim=d.get("hidden_dim", 256),
+        )
+
+    @classmethod
+    def from_yaml(cls, path: str) -> "RunConfig":
+        import yaml
+
+        with open(path, "r") as f:
+            return cls.from_dict(yaml.safe_load(f))
