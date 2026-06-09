@@ -1,0 +1,73 @@
+"""Occlusion Pair Relation Reasoning: Phi_o MLP + Eqs. 8-9.
+
+Predicts a relative depth error per instance in each pair and applies the
+refinement update.
+
+    E_obj  = Sigmoid(Phi_o([F_obj, G_obj]))                       (Eq. 8)
+    D_hat  = [(E_obj * 2) - 1] * D_bar_obj + D_obj                (Eq. 9)
+
+Faithfulness notes
+-------------------
+[Paper Specified]  Eqs. 8-9 verbatim; Phi_o is an MLP on [F_obj, G_obj].
+[Reasonable Assumption]
+                   D_obj = the instance's current depth-layer value (per instance in
+                   the pair). D_bar_obj = the same depth-layer value used as the
+                   correction scale (the "bar" in Eq. 9 is the magnitude the signed
+                   error (E*2-1) in [-1,1] scales). Phi_o is a 3-layer MLP on the
+                   flattened concat of F_obj and G_obj, emitting ONE scalar error
+                   per instance.
+
+Inputs
+------
+    F_obj  (P, 2, C, Hp, Wp)
+    G_obj  (P, 2, Cg, Hp, Wp)
+    D_obj  (P, 2)              current depth-layer per instance in each pair
+    D_bar  (P, 2)              correction scale (defaults to D_obj)
+Outputs
+-------
+    D_hat  (P, 2)              refined depth per instance
+    E_obj  (P, 2)              predicted relative error in [0,1]
+Complexity
+----------
+    O(P * 2 * (C+Cg) * Hp * Wp * width)   single MLP pass; tiny vs. backbone.
+"""
+
+from __future__ import annotations
+
+from typing import Optional, Tuple
+
+import torch
+import torch.nn as nn
+
+
+class RelationReasoning(nn.Module):
+    def __init__(self, in_channels: int, geom_channels: int, output_size: int = 7, hidden: int = 256) -> None:
+        super().__init__()
+        feat_dim = (in_channels + geom_channels) * output_size * output_size
+        self.mlp = nn.Sequential(
+            nn.Linear(feat_dim, hidden),
+            nn.ReLU(inplace=True),
+            nn.Linear(hidden, hidden),
+            nn.ReLU(inplace=True),
+            nn.Linear(hidden, 1),
+        )
+
+    def forward(
+        self,
+        f_obj: torch.Tensor,            # (P, 2, C, Hp, Wp)
+        g_obj: torch.Tensor,            # (P, 2, Cg, Hp, Wp)
+        d_obj: torch.Tensor,            # (P, 2)
+        d_bar: Optional[torch.Tensor] = None,  # (P, 2)
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        p = f_obj.shape[0]
+        if p == 0:
+            empty = f_obj.new_zeros(0, 2)
+            return empty, empty
+        if d_bar is None:
+            d_bar = d_obj
+
+        x = torch.cat([f_obj, g_obj], dim=2)                # (P, 2, C+Cg, Hp, Wp)
+        x = x.flatten(2)                                    # (P, 2, feat_dim)
+        e = torch.sigmoid(self.mlp(x)).squeeze(-1)          # (P, 2)  Eq.8
+        d_hat = ((e * 2.0) - 1.0) * d_bar + d_obj           # (P, 2)  Eq.9
+        return d_hat, e
