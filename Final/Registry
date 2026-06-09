@@ -1,0 +1,47 @@
+"""Lightweight model/component registry.
+
+Lets components and full-model variants be referenced by string name from configs
+(e.g. registry-driven experiment sweeps) without hard imports at call sites.
+
+Usage
+-----
+    from instancedepth.models.registry import MODEL_REGISTRY, register_model
+
+    @register_model("instance_depth")
+    class InstanceDepth(nn.Module): ...
+
+    model_cls = MODEL_REGISTRY.get("instance_depth")
+"""
+
+from __future__ import annotations
+
+from typing import Callable, Dict, Type
+
+
+class _Registry:
+    def __init__(self, kind: str) -> None:
+        self._kind = kind
+        self._items: Dict[str, type] = {}
+
+    def register(self, name: str) -> Callable[[type], type]:
+        def deco(cls: type) -> type:
+            if name in self._items:
+                raise KeyError(f"{self._kind} '{name}' already registered")
+            self._items[name] = cls
+            return cls
+        return deco
+
+    def get(self, name: str) -> type:
+        if name not in self._items:
+            raise KeyError(f"unknown {self._kind} '{name}'. Available: {sorted(self._items)}")
+        return self._items[name]
+
+    def available(self):
+        return sorted(self._items)
+
+
+MODEL_REGISTRY = _Registry("model")
+
+
+def register_model(name: str):
+    return MODEL_REGISTRY.register(name)
