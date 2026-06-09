@@ -1,0 +1,8 @@
+instancedepth_data/
+├── sequences/
+│   └── seq_00001/
+│       ├── rgb/            # 000000.jpg ... zero-padded, ordered  ← from left_rgb
+│       ├── depth/          # 000000.npy ... matching frames        ← from left_filled npy
+│       └── meta.json       # scene/activity/condition tags + frame count
+├── annotations/            # written LATER by the pipeline
+└── splits/{train,test}.txt
