@@ -1,38 +1,34 @@
-"""Occlusion pair selection (Section 4.2.2, first paragraph).
+"""ROIAlign feature + geometric prior extraction (Section 4.2.2, Eq. 8 inputs).
 
-Pipeline per image:
-  1. Filter instances: category confidence > cls_thresh (0.9) AND
-     mask confidence > mask_thresh (0.8).
-  2. For each surviving MAIN instance, find overlapping instances with
-     mask IoU > iou_thresh (0.1).
-  3. Among overlaps, keep the one NEAREST in depth (smallest |dep_main - dep_other|)
-     as the GUEST.
-  => yields a set of (main_idx, guest_idx) pairs.
+For each occlusion pair (main, guest) we extract, for BOTH instances:
+  * F_obj : multi-scale depth features pooled to a fixed Hp x Wp grid via ROIAlign.
+  * G_obj : geometric priors = [mask logits (ROIAligned), normalized coords,
+            global/init depth (ROIAligned)].
 
 Faithfulness notes
 -------------------
-[Paper Specified]  cls>0.9, mask>0.8, IoU>0.1, nearest-in-depth guest.
+[Paper Specified]  F_obj in R^{2 x C x Hp x Wp}; G_obj = {mask logits, normalized
+                   coordinates, global depths}; extracted via ROIAlign [23].
 [Reasonable Assumption]
-                   "mask confidence" = mean sigmoid prob inside the binarized mask;
-                   "category confidence" = max softmax prob over foreground classes.
-                   Pairs are directed (main -> guest); a pair is emitted only if a
-                   main has at least one valid overlapping instance.
+                   Hp=Wp=7 (Mask R-CNN default; plan assumption C1). Normalized
+                   coords are a 2-channel (x,y) grid in [0,1] over each ROI.
+                   "global depths" = the init/holistic depth map, ROIAligned per box.
 
 Inputs
 ------
-    pred_logits  (N, K+1)   per-query class logits (single image)
-    pred_masks   (N, Hf, Wf) per-query mask logits
-    pred_depth   (N,)        per-query depth layer
+    depth_feats  (B, C, Hd, Wd)     shared depth features (e.g. decoder mask feats)
+    mask_logits  (B, N, Hf, Wf)     per-query mask logits
+    init_depth   (B, 1, Hi, Wi)     HDI holistic depth (global depth prior)
+    boxes        (P, 2, 4)          xyxy boxes per (main,guest) in feature coords
+    batch_index  (P,)               which image each pair belongs to
 Outputs
 -------
-    pairs        LongTensor (P, 2) of (main_idx, guest_idx) into [0, N)
-    keep_idx     LongTensor (M,) surviving instance indices (for bookkeeping)
-
+    F_obj  (P, 2, C, Hp, Wp)
+    G_obj  (P, 2, Cg, Hp, Wp)       Cg = 1 (mask) + 2 (coords) + 1 (depth) = 4
 Complexity
 ----------
-    Filtering    O(N * Hf * Wf)        one pass over masks for confidences.
-    IoU matrix   O(M^2 * Hf * Wf)      pairwise mask intersections (M = survivors).
-                 In practice M is small (tens), so this is cheap vs. the backbone.
+    ROIAlign      O(P * 2 * C * Hp * Wp * s^2)   s = sampling_ratio.
+    Negligible vs. backbone; P pairs, each pooling two small ROIs.
 """
 
 from __future__ import annotations
@@ -40,79 +36,85 @@ from __future__ import annotations
 from typing import Tuple
 
 import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torchvision.ops import roi_align
 
 
-@torch.no_grad()
-def select_occlusion_pairs(
-    pred_logits: torch.Tensor,      # (N, K+1)
-    pred_masks: torch.Tensor,       # (N, Hf, Wf)
-    pred_depth: torch.Tensor,       # (N,)
-    cls_thresh: float = 0.9,
-    mask_thresh: float = 0.8,
-    iou_thresh: float = 0.1,
-    mask_binarize: float = 0.5,
-) -> Tuple[torch.Tensor, torch.Tensor]:
-    device = pred_logits.device
-    n = pred_logits.shape[0]
-
-    # --- category confidence: max prob over foreground classes (exclude no-object) ---
-    probs = pred_logits.softmax(-1)[:, :-1]                 # (N, K)
-    cls_conf, _ = probs.max(dim=-1)                         # (N,)
-
-    # --- mask confidence: mean sigmoid prob inside the binarized mask ---
-    mp = pred_masks.sigmoid()                               # (N, Hf, Wf)
-    binm = (mp >= mask_binarize)                            # (N, Hf, Wf) bool
-    area = binm.flatten(1).sum(-1).clamp_min(1)             # (N,)
-    mask_conf = (mp * binm).flatten(1).sum(-1) / area       # (N,)
-
-    keep = (cls_conf > cls_thresh) & (mask_conf > mask_thresh)
-    keep_idx = torch.nonzero(keep, as_tuple=False).squeeze(-1)  # (M,)
-    m = keep_idx.numel()
-    if m < 2:
-        return torch.empty(0, 2, dtype=torch.long, device=device), keep_idx
-
-    # --- pairwise IoU over surviving binary masks ---
-    bm = binm[keep_idx].flatten(1).float()                  # (M, P_pix)
-    inter = bm @ bm.t()                                     # (M, M)
-    areas = bm.sum(-1)                                      # (M,)
-    union = areas[:, None] + areas[None, :] - inter
-    iou = inter / union.clamp_min(1e-6)                     # (M, M)
-    iou.fill_diagonal_(0.0)
-
-    dep = pred_depth[keep_idx]                              # (M,)
-    depth_dist = (dep[:, None] - dep[None, :]).abs()        # (M, M)
-
-    overlap = iou > iou_thresh                              # (M, M) bool
-    pairs = []
-    for a in range(m):
-        cand = torch.nonzero(overlap[a], as_tuple=False).squeeze(-1)
-        if cand.numel() == 0:
-            continue
-        guest_local = cand[torch.argmin(depth_dist[a, cand])]  # nearest in depth
-        pairs.append((int(keep_idx[a]), int(keep_idx[guest_local])))
-
-    if not pairs:
-        return torch.empty(0, 2, dtype=torch.long, device=device), keep_idx
-    return torch.tensor(pairs, dtype=torch.long, device=device), keep_idx
+def _normalized_coord_grid(hp: int, wp: int, device, dtype) -> torch.Tensor:
+    """Return (2, Hp, Wp): channel 0 = x in [0,1], channel 1 = y in [0,1]."""
+    ys = torch.linspace(0, 1, hp, device=device, dtype=dtype)
+    xs = torch.linspace(0, 1, wp, device=device, dtype=dtype)
+    yy, xx = torch.meshgrid(ys, xs, indexing="ij")
+    return torch.stack([xx, yy], dim=0)                     # (2, Hp, Wp)
 
 
-@torch.no_grad()
-def masks_to_boxes(masks: torch.Tensor, binarize: float = 0.5) -> torch.Tensor:
-    """Convert (Q, Hf, Wf) mask logits to (Q, 4) xyxy boxes in feature coords.
+class ROIPairExtractor(nn.Module):
+    def __init__(self, output_size: int = 7, sampling_ratio: int = 2) -> None:
+        super().__init__()
+        self.output_size = output_size
+        self.sampling_ratio = sampling_ratio
 
-    Empty masks get a 1x1 box at the origin to keep ROIAlign well-defined.
-    Complexity: O(Q * Hf * Wf).
-    """
-    b = (masks.sigmoid() >= binarize)                       # (Q, Hf, Wf)
-    q, h, w = b.shape
-    boxes = masks.new_zeros(q, 4)
-    for i in range(q):
-        ys, xs = torch.nonzero(b[i], as_tuple=True)
-        if xs.numel() == 0:
-            boxes[i] = torch.tensor([0, 0, 1, 1], device=masks.device, dtype=masks.dtype)
-        else:
-            boxes[i] = torch.tensor(
-                [xs.min(), ys.min(), xs.max() + 1, ys.max() + 1],
-                device=masks.device, dtype=masks.dtype,
-            )
-    return boxes
+    def _roi(self, feat: torch.Tensor, boxes_with_idx: torch.Tensor, spatial_scale: float) -> torch.Tensor:
+        return roi_align(
+            feat, boxes_with_idx,
+            output_size=(self.output_size, self.output_size),
+            spatial_scale=spatial_scale,
+            sampling_ratio=self.sampling_ratio,
+            aligned=True,
+        )
+
+    def forward(
+        self,
+        depth_feats: torch.Tensor,      # (B, C, Hd, Wd)
+        mask_logits: torch.Tensor,      # (B, N, Hf, Wf)
+        init_depth: torch.Tensor,       # (B, 1, Hi, Wi)
+        boxes: torch.Tensor,            # (P, 2, 4)  feature-coord xyxy
+        batch_index: torch.Tensor,      # (P,)
+        pair_query_idx: torch.Tensor,   # (P, 2) query indices for mask selection
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        device, dtype = depth_feats.device, depth_feats.dtype
+        p = boxes.shape[0]
+        hp = wp = self.output_size
+        c = depth_feats.shape[1]
+
+        if p == 0:
+            f_obj = depth_feats.new_zeros(0, 2, c, hp, wp)
+            g_obj = depth_feats.new_zeros(0, 2, 4, hp, wp)
+            return f_obj, g_obj
+
+        # Boxes are given in the mask-feature coordinate frame (Hf, Wf). We pass
+        # spatial_scale = (feature size / mask-feature size) so ROIAlign maps boxes
+        # onto each target map correctly.
+        hf, wf = mask_logits.shape[-2:]
+
+        # Flatten the (P,2) pair layout into 2P rois, tagged with batch index.
+        flat_boxes = boxes.reshape(2 * p, 4)                          # (2P, 4)
+        flat_bidx = batch_index.repeat_interleave(2).to(dtype)        # (2P,)
+        rois = torch.cat([flat_bidx[:, None], flat_boxes], dim=1)     # (2P, 5)
+
+        # --- F_obj: ROIAlign on depth feats ---
+        scale_feat = depth_feats.shape[-1] / wf
+        f_pooled = self._roi(depth_feats, rois, scale_feat)           # (2P, C, Hp, Wp)
+        f_obj = f_pooled.reshape(p, 2, c, hp, wp)
+
+        # --- G_obj component 1: per-instance mask logits, ROIAligned ---
+        # Gather each pair's two mask-logit maps: (2P, 1, Hf, Wf).
+        flat_qidx = pair_query_idx.reshape(2 * p)                     # (2P,)
+        flat_bidx_long = batch_index.repeat_interleave(2).long()      # (2P,)
+        sel_masks = mask_logits[flat_bidx_long, flat_qidx].unsqueeze(1)  # (2P,1,Hf,Wf)
+        # rois for these are in the same (Hf,Wf) frame -> scale 1.0
+        rois_mask = torch.cat([torch.arange(2 * p, device=device, dtype=dtype)[:, None], flat_boxes], dim=1)
+        mask_pooled = self._roi(sel_masks, rois_mask, 1.0)            # (2P,1,Hp,Wp)
+
+        # --- G_obj component 2: normalized coordinate grid (shared) ---
+        coord = _normalized_coord_grid(hp, wp, device, dtype)        # (2, Hp, Wp)
+        coord = coord.unsqueeze(0).expand(2 * p, -1, -1, -1)         # (2P,2,Hp,Wp)
+
+        # --- G_obj component 3: global/init depth, ROIAligned ---
+        scale_depth = init_depth.shape[-1] / wf
+        depth_pooled = self._roi(init_depth, rois, scale_depth)      # (2P,1,Hp,Wp)
+
+        g = torch.cat([mask_pooled, coord, depth_pooled], dim=1)     # (2P,4,Hp,Wp)
+        g_obj = g.reshape(p, 2, 4, hp, wp)
+        return f_obj, g_obj
