@@ -1,0 +1,168 @@
+import torch
+from PIL import Image
+import numpy as np
+import os
+from pathlib import Path
+from sam3.model_builder import build_sam3_image_model
+from sam3.model.sam3_image_processor import Sam3Processor
+
+# ==========================================
+# 1. Configuration
+# ==========================================
+extensions = {'.jpg', '.png', '.jpeg', '.webp'}
+
+current_dir = Path(__file__).resolve().parent
+
+source_dirs = [
+    # current_dir / "Dataset3/LT",
+    current_dir / "Karan/left_rgb"
+]
+
+output_dir = current_dir / "Karan/left_rgb_Masked"
+
+# Distinct colors for different objects (R, G, B, Opacity)
+# Opacity: 0 = fully transparent, 255 = fully opaque tint
+TINT_COLORS = [
+    (255, 0, 0, 100),       # Red
+    (0, 255, 0, 100),       # Green
+    (0, 0, 255, 100),       # Blue
+    (255, 255, 0, 100),     # Yellow
+    (255, 0, 255, 100),     # Magenta
+    (0, 255, 255, 100),     # Cyan
+    (255, 128, 0, 100),     # Orange
+    (128, 0, 255, 100),     # Purple
+    (0, 128, 255, 100),     # Sky Blue
+    (255, 128, 128, 100),   # Pink
+]
+
+# ==========================================
+# 2. Load Model (once)
+# ==========================================
+def load_model():
+    print("Loading Model...")
+    model = build_sam3_image_model()
+    model = model.float()
+    print("Model loaded successfully.")
+    return model
+
+# ==========================================
+# 3. Apply different tint colors to each mask
+# ==========================================
+def apply_multi_color_tint(original_img_np, masks_cpu):
+    """
+    Tints each detected object with a different color and per-color opacity.
+    
+    original_img_np: numpy array (H, W, 3) in RGB format, uint8
+    masks_cpu: list of numpy arrays, each (H, W), individual masks
+    Returns: numpy array (H, W, 3) in RGB format, uint8
+    """
+    h, w = original_img_np.shape[:2]
+    result = original_img_np.astype(np.float32)
+
+    for i, mask in enumerate(masks_cpu):
+        mask_2d = mask.squeeze()
+
+        if mask_2d.shape[:2] != (h, w):
+            print(f"  Skipping mask {i}: dimension mismatch")
+            continue
+
+        # Binarize
+        if mask_2d.max() > 1:
+            binary_mask = (mask_2d >= 128).astype(np.uint8)
+        else:
+            binary_mask = (mask_2d >= 0.5).astype(np.uint8)
+
+        food_coordinates = binary_mask.astype(bool)
+
+        # Pick color for this object (cycle through TINT_COLORS)
+        color_entry = TINT_COLORS[i % len(TINT_COLORS)]
+        color = np.array(color_entry[:3], dtype=np.float32)  # RGB only
+        opacity = color_entry[3] / 255.0  # Normalize alpha to 0.0-1.0
+
+        # Blend: result = original * (1 - opacity) + tint_color * opacity
+        result[food_coordinates] = (
+            result[food_coordinates] * (1 - opacity) + 
+            color * opacity
+        )
+
+    return np.clip(result, 0, 255).astype(np.uint8)
+
+# ==========================================
+# 4. Process a single image with SAM-3
+# ==========================================
+def process_image(image_path, model, output_dir):
+    filename = os.path.splitext(os.path.basename(image_path))[0]
+
+    with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+        processor = Sam3Processor(model)
+
+        # Load image
+        print(f"  Loading image: {image_path}")
+        image = Image.open(image_path).convert("RGB")
+        inference_state = processor.set_image(image)
+
+        # Prompt the model with text
+        print(f"  Running inference on: {filename}")
+        output = processor.set_text_prompt(state=inference_state, prompt="person")
+
+        # Get the masks
+        masks = output["masks"]
+        masks_cpu = masks.cpu().numpy() if torch.is_tensor(masks) else np.array(masks)
+
+        # Load original image as numpy (RGB)
+        original_img_np = np.array(image)  # (H, W, 3) in RGB
+
+        # Apply different color tint to each object
+        result = apply_multi_color_tint(original_img_np, masks_cpu)
+
+        # Save output
+        output_path = os.path.join(output_dir, f"{filename}.png")
+        result_pil = Image.fromarray(result, mode='RGB')
+        result_pil.save(output_path)
+        print(f"  Saved tinted output ({len(masks_cpu)} objects): {output_path}")
+
+# ==========================================
+# 5. Main: Iterate through all source directories and images
+# ==========================================
+def main():
+    os.makedirs(output_dir, exist_ok=True)
+
+    model = load_model()
+
+    processed = 0
+    skipped = 0
+
+    for source_dir in source_dirs:
+        if not os.path.exists(source_dir):
+            print(f"Source directory not found: {source_dir}")
+            continue
+
+        print(f"\nProcessing directory: {source_dir}")
+
+        image_files = sorted([
+            f for f in os.listdir(source_dir)
+            if os.path.splitext(f)[1].lower() in extensions
+        ])
+
+        print(f"Found {len(image_files)} images in {source_dir}")
+
+        for img_fname in image_files:
+            image_path = os.path.join(source_dir, img_fname)
+            try:
+                process_image(image_path, model, output_dir)
+                processed += 1
+            except Exception as e:
+                print(f"  ERROR processing {img_fname}: {e}")
+                skipped += 1
+                continue
+
+    # Summary
+    print(f"\n{'='*50}")
+    print(f"Processing complete!")
+    print(f"  Processed: {processed}")
+    print(f"  Skipped (errors): {skipped}")
+    print(f"  Output saved to: {output_dir}/")
+    print(f"{'='*50}")
+
+if __name__ == "__main__":
+    main()
