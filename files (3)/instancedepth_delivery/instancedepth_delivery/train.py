@@ -1,0 +1,202 @@
+"""Three-phase InstanceDepth training (paper Sec. 4.3).
+
+    Phase 1  Global Depth Range Pretraining       55k iters, LR 1e-5
+             trains backbone + HDI; loss = SigLog(init_depth, GT)
+             + range-segmentation CE.
+    Phase 2  Instance Depth Layer Specialization  25k iters, LR 1e-5
+             freezes the depth encoder; trains the instance decoder with
+             Hungarian-matched mask/class/depth-layer losses (Eqs. 5-7).
+    Phase 3  Occlusion-Aware Joint Refinement     25k iters, LR 1e-6
+             freezes the instance decoder; fine-tunes encoder+decoder+Phi_o
+             with L_ref = l1*L_obj + l2*L_dist (Eqs. 10-12) and a dense
+             SigLog term so the holistic depth keeps its supervision.
+
+Faithfulness labels
+-------------------
+[Paper Specified]   phase order, what is frozen per phase, iteration counts,
+                    learning rates (1e-5 / 1e-5 / 1e-6), the per-phase losses.
+[Strongly Inferred] each phase initializes from the previous phase's weights.
+[Reasonable Assumption] AdamW, weight decay 0.01, gradient clipping at 1.0,
+                    constant LR (no schedule is given), batch size, and keeping
+                    a dense SigLog term in phase 3 (the paper fine-tunes the
+                    depth encoder/decoder there, which is unconstrained without
+                    a dense term).
+
+Usage
+-----
+    python train.py --model-config instancedepth/configs/instance_depth.yaml \
+                    --data-root gid_custom --phase 1 --iters 55000 --lr 1e-5 \
+                    --batch-size 4 --out runs/phase1
+    python train.py ... --phase 2 --iters 25000 --lr 1e-5 \
+                    --init-from runs/phase1/ckpt_final.pth --out runs/phase2
+    python train.py ... --phase 3 --iters 25000 --lr 1e-6 \
+                    --init-from runs/phase2/ckpt_final.pth --out runs/phase3
+"""
+
+from __future__ import annotations
+
+import argparse
+import itertools
+import logging
+import time
+from pathlib import Path
+
+import torch
+import yaml
+from torch.utils.data import DataLoader
+
+from instancedepth.build import build_instance_depth_from_yaml
+from instancedepth.data.gid_dataset import (
+    GIDDatasetConfig, GIDInstanceDepthDataset, build_refine_targets, collate_gid)
+from instancedepth.losses.hdi_losses import SigLogLoss, range_segmentation_loss
+from instancedepth.losses.instance_losses import InstanceSetCriterion
+from instancedepth.losses.refine_losses import RefinementCriterion
+from instancedepth.models.instance.matcher import HungarianMatcher
+from instancedepth.utils.checkpoint import load_checkpoint, save_checkpoint
+
+log = logging.getLogger("train")
+
+PAPER_DEFAULTS = {1: dict(iters=55_000, lr=1e-5),
+                  2: dict(iters=25_000, lr=1e-5),
+                  3: dict(iters=25_000, lr=1e-6)}
+
+
+def parse_args() -> argparse.Namespace:
+    ap = argparse.ArgumentParser(description="InstanceDepth 3-phase trainer")
+    ap.add_argument("--model-config", required=True)
+    ap.add_argument("--data-root", required=True, help="data engine out_root")
+    ap.add_argument("--phase", type=int, choices=(1, 2, 3), required=True)
+    ap.add_argument("--iters", type=int, default=None, help="default: paper value")
+    ap.add_argument("--lr", type=float, default=None, help="default: paper value")
+    ap.add_argument("--batch-size", type=int, default=4)
+    ap.add_argument("--num-workers", type=int, default=4)
+    ap.add_argument("--image-size", type=int, nargs=2, default=(518, 518))
+    ap.add_argument("--init-from", default=None, help="previous phase checkpoint")
+    ap.add_argument("--resume", default=None, help="resume same-phase checkpoint")
+    ap.add_argument("--out", required=True)
+    ap.add_argument("--save-every", type=int, default=5_000)
+    ap.add_argument("--log-every", type=int, default=50)
+    ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
+    ap.add_argument("--weight-decay", type=float, default=0.01)
+    ap.add_argument("--clip-grad", type=float, default=1.0)
+    ap.add_argument("--dense-weight-phase3", type=float, default=1.0,
+                    help="weight of the dense SigLog term kept in phase 3")
+    return ap.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+    args.iters = args.iters or PAPER_DEFAULTS[args.phase]["iters"]
+    args.lr = args.lr or PAPER_DEFAULTS[args.phase]["lr"]
+    out_dir = Path(args.out)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    logging.basicConfig(level=logging.INFO,
+                        format="%(asctime)s %(levelname)s %(message)s")
+
+    # ---- model ------------------------------------------------------------
+    model = build_instance_depth_from_yaml(args.model_config).to(args.device)
+    if args.init_from:
+        info = load_checkpoint(args.init_from, model)
+        log.info("init from %s (missing=%d unexpected=%d)",
+                 args.init_from, len(info["missing"]), len(info["unexpected"]))
+    model.set_phase(args.phase)                     # Sec. 4.3 freezing
+    model.train()
+
+    with open(args.model_config) as f:
+        mc = yaml.safe_load(f)
+    max_depth = float(mc.get("max_depth", 10.0))
+    num_ranges = model.num_ranges
+
+    # ---- data -------------------------------------------------------------
+    ds = GIDInstanceDepthDataset(GIDDatasetConfig(
+        annotations_root=args.data_root, split="train",
+        image_size=tuple(args.image_size), max_depth=max_depth))
+    loader = DataLoader(ds, batch_size=args.batch_size, shuffle=True,
+                        num_workers=args.num_workers, collate_fn=collate_gid,
+                        drop_last=True, pin_memory=args.device.startswith("cuda"))
+    log.info("phase %d | %d train frames | %d iters | lr %.1e",
+             args.phase, len(ds), args.iters, args.lr)
+
+    # ---- losses -----------------------------------------------------------
+    siglog = SigLogLoss().to(args.device)
+    matcher = HungarianMatcher()
+    inst_crit = InstanceSetCriterion(
+        num_classes=mc.get("instance", {}).get("num_classes", 1)).to(args.device)
+    ref_crit = RefinementCriterion().to(args.device)
+
+    # ---- optimizer over trainable params only -------------------------------
+    params = [p for p in model.parameters() if p.requires_grad]
+    optim = torch.optim.AdamW(params, lr=args.lr, weight_decay=args.weight_decay)
+    log.info("trainable tensors: %d / %d",
+             len(params), sum(1 for _ in model.parameters()))
+
+    start_step = 0
+    if args.resume:
+        info = load_checkpoint(args.resume, model, optim)
+        start_step = info["step"]
+        log.info("resumed at step %d", start_step)
+
+    # ---- loop ---------------------------------------------------------------
+    data_iter = iter(itertools.cycle(loader))
+    t0 = time.time()
+    for step in range(start_step, args.iters):
+        batch = next(data_iter)
+        rgb = batch["image"].to(args.device, non_blocking=True)
+        gt_depth = batch["depth"].to(args.device, non_blocking=True)
+        targets = [{k: v.to(args.device) for k, v in t.items()}
+                   for t in batch["targets"]]
+
+        run_instance = args.phase >= 2
+        run_refine = args.phase == 3
+        out = model(rgb, run_instance=run_instance, run_refine=run_refine)
+
+        logs = {}
+        if args.phase == 1:
+            l_sig = siglog(out["init_depth"], gt_depth)
+            l_rng = range_segmentation_loss(out["range_logits"], gt_depth,
+                                            max_depth, num_ranges)
+            loss = l_sig + l_rng
+            logs = dict(siglog=l_sig, range=l_rng)
+
+        elif args.phase == 2:
+            indices = matcher(out, targets)
+            li = inst_crit(out, targets, indices)
+            loss = li["loss_total"]
+            logs = {k: v for k, v in li.items() if k != "loss_total"}
+
+        else:  # phase 3
+            indices = matcher(out, targets)
+            meta = out.get("refine_meta")
+            if meta is not None and meta["pair_query_idx"].numel() > 0:
+                dt, valid = build_refine_targets(
+                    meta["pair_query_idx"], meta["batch_index"], indices, targets)
+                lr_ = ref_crit(out["d_hat"][valid], dt[valid])
+            else:
+                z = out["init_depth"].sum() * 0.0
+                lr_ = dict(loss_obj=z, loss_dist=z, loss_ref=z)
+            l_sig = siglog(out["init_depth"], gt_depth)
+            loss = lr_["loss_ref"] + args.dense_weight_phase3 * l_sig
+            logs = dict(obj=lr_["loss_obj"], dist=lr_["loss_dist"], siglog=l_sig)
+
+        optim.zero_grad(set_to_none=True)
+        loss.backward()
+        if args.clip_grad > 0:
+            torch.nn.utils.clip_grad_norm_(params, args.clip_grad)
+        optim.step()
+
+        if step % args.log_every == 0 or step == args.iters - 1:
+            extras = " ".join(f"{k}={float(v):.4f}" for k, v in logs.items())
+            log.info("step %6d/%d loss=%.4f %s (%.2fs/it)",
+                     step, args.iters, float(loss), extras,
+                     (time.time() - t0) / max(step - start_step + 1, 1))
+        if (step + 1) % args.save_every == 0:
+            save_checkpoint(str(out_dir / f"ckpt_{step + 1:06d}.pth"),
+                            model, optim, step=step + 1, phase=args.phase)
+
+    save_checkpoint(str(out_dir / "ckpt_final.pth"), model, optim,
+                    step=args.iters, phase=args.phase)
+    log.info("phase %d done -> %s", args.phase, out_dir / "ckpt_final.pth")
+
+
+if __name__ == "__main__":
+    main()

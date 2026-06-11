@@ -1,0 +1,44 @@
+# GID-style data engine config for the custom RGB-D dataset.
+# Run:  python -m instancedepth.data_engine.run_generate --config instancedepth/configs/gid_custom.yaml
+
+dataset_root: "InstanceDepth/Dataset"      # contains "Batch 1" .. "Batch 10"
+
+layout:
+  rgb_dir: "left_rgb"
+  depth_png_dir: "left_filled"
+  depth_npy_dir: "left_filled_np"
+
+depth:
+  unit: "auto"            # auto-detects mm vs m per sequence; pin to "mm"/"m" if known
+  min_depth_m: 0.01       # GID visual/metric range (paper Fig. 2: 0.01 - 10.0 m)
+  max_depth_m: 10.0       # must equal max_depth in instance_depth.yaml
+  prefer_npy: true
+
+sam3:
+  backend: "native"       # "native" (github repo), "hf", or "mock"
+  checkpoint_path: null   # e.g. "sam3/checkpoints/sam3.pt"; null = repo default
+  device: "cuda"
+  # One SAM3 video session tracks ONE concept; each prompt below is a session.
+  # Your data is mostly human interactions -> "person". Add e.g. "dog", "ball"
+  # if those appear, and raise instance.num_classes in instance_depth.yaml to match.
+  object_prompts: ["person"]
+  ground_prompts: ["floor", "ground"]
+  min_object_score: 0.5
+  min_mask_area_frac: 0.0001
+  prompt_frame_index: 0
+
+identity:
+  cross_concept_dedup_iou: 0.75
+  reid_iou: 0.5           # paper: highest-IoU matching for identity consistency
+  max_gap: 10
+  min_track_length: 5
+
+output:
+  out_root: "gid_custom"
+  preview_dir: "preview"  # set null to skip overlay dumps
+  preview_every: 60
+
+split:
+  test_fraction: 0.20     # paper Sec. 3: 20% of videos to test
+  seed: 2026
+  stratify_by_batch: true
