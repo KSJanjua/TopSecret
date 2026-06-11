@@ -1,168 +1,238 @@
-import torch
-from PIL import Image
-import numpy as np
+"""
+sam3_sequence_runner.py
+=======================
+
+Run SAM3 on ONE sequence at a time, with a prompt YOU choose each run.
+
+This is the tool you asked for: you point it at a single sequence folder, set
+the PROMPT (e.g. "person", "floor", "ground", "court"), and it segments every
+frame in that sequence, saving:
+
+  1. RAW MASK DATA  -> per-frame .npz (compressed integer ID-map). This is the
+                       real annotation data (each instance gets an integer id;
+                       background = 0). Lossless, training-usable.
+  2. OVERLAYS       -> per-frame tinted .png so you can visually verify what SAM3
+                       grabbed (each instance a different color).
+  3. summary.json   -> per-frame instance count + which prompt was used.
+
+Because you run it once per prompt, the outputs are organized by prompt, so
+"person" masks and "floor" masks never collide. You can run person first, then
+re-run with prompt="floor", etc., on the same sequence.
+
+----------------------------------------------------------------------------
+REQUIREMENTS (your SAM3 machine)
+  Python 3.12+, PyTorch 2.7+, CUDA 12.6+, and SAM3 checkpoint access granted
+  (request at https://huggingface.co/facebook/sam3, then `hf auth login`).
+
+USAGE
+  Edit the CONFIG block (SEQUENCE_DIR and PROMPT), then:
+      python sam3_sequence_runner.py
+
+  Or override from the command line without editing the file:
+      python sam3_sequence_runner.py --seq path/to/left_rgb --prompt floor
+      python sam3_sequence_runner.py --seq path/to/left_rgb --prompt person
+----------------------------------------------------------------------------
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
 import os
+import re
+import sys
+import time
 from pathlib import Path
-from sam3.model_builder import build_sam3_image_model
-from sam3.model.sam3_image_processor import Sam3Processor
 
-# ==========================================
-# 1. Configuration
-# ==========================================
-extensions = {'.jpg', '.png', '.jpeg', '.webp'}
+import numpy as np
+from PIL import Image
 
-current_dir = Path(__file__).resolve().parent
+# ==========================================================================
+# CONFIG  -- EDIT THESE, or pass --seq / --prompt on the command line
+# ==========================================================================
+SEQUENCE_DIR = Path("dataset/sequences/batch_1/20260120_094343/left_rgb")
+PROMPT = "person"                       # change per run: person / floor / ground / court ...
 
-source_dirs = [
-    # current_dir / "Dataset3/LT",
-    current_dir / "Karan/left_rgb"
+OUTPUT_ROOT = Path("sam3_output")       # results go to OUTPUT_ROOT/<seq>/<prompt>/
+IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
+SCORE_THRESH = 0.5                      # drop masks below this confidence
+MIN_MASK_AREA = 50                      # drop specks smaller than this many pixels
+SAVE_OVERLAYS = True                    # set False to save only raw .npz (faster)
+USE_CUDA = True                         # False only for CPU debugging
+# ==========================================================================
+
+
+# Distinct overlay colors (R, G, B). Cycled across instances.
+PALETTE = [
+    (255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 0), (255, 0, 255),
+    (0, 255, 255), (255, 128, 0), (128, 0, 255), (0, 128, 255), (255, 128, 128),
 ]
+OVERLAY_ALPHA = 0.45
 
-output_dir = current_dir / "Karan/left_rgb_Masked"
 
-# Distinct colors for different objects (R, G, B, Opacity)
-# Opacity: 0 = fully transparent, 255 = fully opaque tint
-TINT_COLORS = [
-    (255, 0, 0, 100),       # Red
-    (0, 255, 0, 100),       # Green
-    (0, 0, 255, 100),       # Blue
-    (255, 255, 0, 100),     # Yellow
-    (255, 0, 255, 100),     # Magenta
-    (0, 255, 255, 100),     # Cyan
-    (255, 128, 0, 100),     # Orange
-    (128, 0, 255, 100),     # Purple
-    (0, 128, 255, 100),     # Sky Blue
-    (255, 128, 128, 100),   # Pink
-]
+# ---- numeric-aware frame ordering (frame_2 before frame_10) ----------------
+_NUM = re.compile(r"(\d+)")
+def natural_key(name: str):
+    return [int(t) if t.isdigit() else t.lower() for t in _NUM.split(name)]
 
-# ==========================================
-# 2. Load Model (once)
-# ==========================================
+
+def list_frames(folder: Path):
+    files = [p for p in folder.iterdir() if p.suffix.lower() in IMAGE_EXTS]
+    return sorted(files, key=lambda p: natural_key(p.name))
+
+
+# ---- SAM3 model (mirrors your working script) ------------------------------
 def load_model():
-    print("Loading Model...")
+    print("Loading SAM3 model ...")
+    from sam3.model_builder import build_sam3_image_model
     model = build_sam3_image_model()
     model = model.float()
-    print("Model loaded successfully.")
+    print("Model loaded.")
     return model
 
-# ==========================================
-# 3. Apply different tint colors to each mask
-# ==========================================
-def apply_multi_color_tint(original_img_np, masks_cpu):
-    """
-    Tints each detected object with a different color and per-color opacity.
-    
-    original_img_np: numpy array (H, W, 3) in RGB format, uint8
-    masks_cpu: list of numpy arrays, each (H, W), individual masks
-    Returns: numpy array (H, W, 3) in RGB format, uint8
-    """
-    h, w = original_img_np.shape[:2]
-    result = original_img_np.astype(np.float32)
 
-    for i, mask in enumerate(masks_cpu):
-        mask_2d = mask.squeeze()
+def segment_frame(model, image: Image.Image, prompt: str):
+    """Return (masks, scores): list of (H,W) bool masks + list of float scores."""
+    import torch
+    from sam3.model.sam3_image_processor import Sam3Processor
 
-        if mask_2d.shape[:2] != (h, w):
-            print(f"  Skipping mask {i}: dimension mismatch")
-            continue
-
-        # Binarize
-        if mask_2d.max() > 1:
-            binary_mask = (mask_2d >= 128).astype(np.uint8)
-        else:
-            binary_mask = (mask_2d >= 0.5).astype(np.uint8)
-
-        food_coordinates = binary_mask.astype(bool)
-
-        # Pick color for this object (cycle through TINT_COLORS)
-        color_entry = TINT_COLORS[i % len(TINT_COLORS)]
-        color = np.array(color_entry[:3], dtype=np.float32)  # RGB only
-        opacity = color_entry[3] / 255.0  # Normalize alpha to 0.0-1.0
-
-        # Blend: result = original * (1 - opacity) + tint_color * opacity
-        result[food_coordinates] = (
-            result[food_coordinates] * (1 - opacity) + 
-            color * opacity
-        )
-
-    return np.clip(result, 0, 255).astype(np.uint8)
-
-# ==========================================
-# 4. Process a single image with SAM-3
-# ==========================================
-def process_image(image_path, model, output_dir):
-    filename = os.path.splitext(os.path.basename(image_path))[0]
-
-    with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+    device_type = "cuda" if USE_CUDA else "cpu"
+    with torch.autocast(device_type=device_type, dtype=torch.bfloat16):
         processor = Sam3Processor(model)
+        state = processor.set_image(image)
+        out = processor.set_text_prompt(state=state, prompt=prompt)
 
-        # Load image
-        print(f"  Loading image: {image_path}")
-        image = Image.open(image_path).convert("RGB")
-        inference_state = processor.set_image(image)
+    masks = out.get("masks", [])
+    scores = out.get("scores", None)
+    masks = masks.cpu().numpy() if hasattr(masks, "cpu") else np.asarray(masks)
+    if scores is not None:
+        scores = scores.cpu().numpy() if hasattr(scores, "cpu") else np.asarray(scores)
+        scores = np.asarray(scores).reshape(-1)
 
-        # Prompt the model with text
-        print(f"  Running inference on: {filename}")
-        output = processor.set_text_prompt(state=inference_state, prompt="person")
+    out_masks, out_scores = [], []
+    for i in range(len(masks)):
+        s = float(scores[i]) if (scores is not None and i < len(scores)) else 1.0
+        if s < SCORE_THRESH:
+            continue
+        m = masks[i].squeeze()
+        m = (m >= 0.5) if m.max() <= 1 else (m >= 128)
+        m = m.astype(bool)
+        if m.sum() < MIN_MASK_AREA:
+            continue
+        out_masks.append(m)
+        out_scores.append(s)
+    return out_masks, out_scores
 
-        # Get the masks
-        masks = output["masks"]
-        masks_cpu = masks.cpu().numpy() if torch.is_tensor(masks) else np.array(masks)
 
-        # Load original image as numpy (RGB)
-        original_img_np = np.array(image)  # (H, W, 3) in RGB
+# ---- serialization ---------------------------------------------------------
+def masks_to_id_map(masks, hw):
+    """Combine a list of binary masks into one int16 ID-map (bg=0, instances=1..N).
 
-        # Apply different color tint to each object
-        result = apply_multi_color_tint(original_img_np, masks_cpu)
+    Later masks overwrite earlier ones where they overlap (painter's order).
+    """
+    id_map = np.zeros(hw, dtype=np.int16)
+    for i, m in enumerate(masks, start=1):
+        if m.shape[:2] == hw:
+            id_map[m] = i
+    return id_map
 
-        # Save output
-        output_path = os.path.join(output_dir, f"{filename}.png")
-        result_pil = Image.fromarray(result, mode='RGB')
-        result_pil.save(output_path)
-        print(f"  Saved tinted output ({len(masks_cpu)} objects): {output_path}")
 
-# ==========================================
-# 5. Main: Iterate through all source directories and images
-# ==========================================
+def save_id_map(path: Path, id_map: np.ndarray, scores):
+    np.savez_compressed(path, id_map=id_map, scores=np.asarray(scores, dtype=np.float32))
+
+
+def make_overlay(img_np: np.ndarray, masks):
+    out = img_np.astype(np.float32)
+    for i, m in enumerate(masks):
+        if m.shape[:2] != img_np.shape[:2]:
+            continue
+        color = np.array(PALETTE[i % len(PALETTE)], np.float32)
+        out[m] = out[m] * (1 - OVERLAY_ALPHA) + color * OVERLAY_ALPHA
+    return np.clip(out, 0, 255).astype(np.uint8)
+
+
+# ---- main per-sequence routine ---------------------------------------------
+def run_sequence(seq_dir: Path, prompt: str, model):
+    frames = list_frames(seq_dir)
+    if not frames:
+        print(f"[error] no frames found in {seq_dir}")
+        return
+
+    # seq name = the timestamp folder (parent of left_rgb), fallback to folder name
+    seq_name = seq_dir.parent.name if seq_dir.name == "left_rgb" else seq_dir.name
+    safe_prompt = prompt.replace(" ", "-")
+    out_dir = OUTPUT_ROOT / seq_name / safe_prompt
+    masks_dir = out_dir / "masks"
+    overlays_dir = out_dir / "overlays"
+    masks_dir.mkdir(parents=True, exist_ok=True)
+    if SAVE_OVERLAYS:
+        overlays_dir.mkdir(parents=True, exist_ok=True)
+
+    print(f"\nSequence : {seq_name}")
+    print(f"Prompt   : '{prompt}'")
+    print(f"Frames   : {len(frames)}")
+    print(f"Output   : {out_dir}")
+
+    summary = {"sequence": seq_name, "prompt": prompt, "num_frames": len(frames), "frames": {}}
+    t0 = time.time()
+
+    for idx, fp in enumerate(frames):
+        frame_id = f"{idx:06d}"
+        try:
+            image = Image.open(fp).convert("RGB")
+            img_np = np.array(image)
+            hw = img_np.shape[:2]
+
+            masks, scores = segment_frame(model, image, prompt)
+            id_map = masks_to_id_map(masks, hw)
+            save_id_map(masks_dir / f"{frame_id}.npz", id_map, scores)
+
+            if SAVE_OVERLAYS:
+                Image.fromarray(make_overlay(img_np, masks)).save(overlays_dir / f"{frame_id}.png")
+
+            summary["frames"][frame_id] = {"source": fp.name, "num_instances": len(masks)}
+            print(f"  [{idx+1}/{len(frames)}] {fp.name} -> {len(masks)} instances")
+
+        except Exception as e:
+            print(f"  [error] frame {fp.name}: {e}")
+            summary["frames"][frame_id] = {"source": fp.name, "error": str(e)}
+
+    elapsed = time.time() - t0
+    summary["elapsed_sec"] = round(elapsed, 1)
+    with open(out_dir / "summary.json", "w") as f:
+        json.dump(summary, f, indent=2)
+
+    n_ok = sum(1 for v in summary["frames"].values() if "error" not in v)
+    print(f"\nDone: {n_ok}/{len(frames)} frames in {elapsed:.1f}s")
+    print(f"  raw masks  -> {masks_dir}")
+    if SAVE_OVERLAYS:
+        print(f"  overlays   -> {overlays_dir}")
+    print(f"  summary    -> {out_dir / 'summary.json'}")
+
+
+def parse_args():
+    ap = argparse.ArgumentParser(description="Run SAM3 on one sequence with a chosen prompt.")
+    ap.add_argument("--seq", type=str, default=None, help="path to a sequence's left_rgb folder")
+    ap.add_argument("--prompt", type=str, default=None, help="text prompt, e.g. person / floor / ground")
+    ap.add_argument("--no-overlays", action="store_true", help="save only raw masks, skip overlays")
+    return ap.parse_args()
+
+
 def main():
-    os.makedirs(output_dir, exist_ok=True)
+    args = parse_args()
+    seq_dir = Path(args.seq) if args.seq else SEQUENCE_DIR
+    prompt = args.prompt if args.prompt else PROMPT
+    if args.no_overlays:
+        global SAVE_OVERLAYS
+        SAVE_OVERLAYS = False
+
+    if not seq_dir.exists():
+        print(f"[fatal] sequence folder not found: {seq_dir}")
+        sys.exit(1)
 
     model = load_model()
+    run_sequence(seq_dir, prompt, model)
 
-    processed = 0
-    skipped = 0
-
-    for source_dir in source_dirs:
-        if not os.path.exists(source_dir):
-            print(f"Source directory not found: {source_dir}")
-            continue
-
-        print(f"\nProcessing directory: {source_dir}")
-
-        image_files = sorted([
-            f for f in os.listdir(source_dir)
-            if os.path.splitext(f)[1].lower() in extensions
-        ])
-
-        print(f"Found {len(image_files)} images in {source_dir}")
-
-        for img_fname in image_files:
-            image_path = os.path.join(source_dir, img_fname)
-            try:
-                process_image(image_path, model, output_dir)
-                processed += 1
-            except Exception as e:
-                print(f"  ERROR processing {img_fname}: {e}")
-                skipped += 1
-                continue
-
-    # Summary
-    print(f"\n{'='*50}")
-    print(f"Processing complete!")
-    print(f"  Processed: {processed}")
-    print(f"  Skipped (errors): {skipped}")
-    print(f"  Output saved to: {output_dir}/")
-    print(f"{'='*50}")
 
 if __name__ == "__main__":
     main()
