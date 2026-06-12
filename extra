@@ -1,0 +1,7 @@
+work@main1[Ayush]:~/intern_storage/Ayush$ .\ .venv\Scripts\Activate.ps1
+bash: . .venvScriptsActivate.ps1: command not found
+work@main1[Ayush]:~/intern_storage/Ayush$ .venv\Scripts\activate.bat
+bash: .venvScriptsactivate.bat: command not found
+work@main1[Ayush]:~/intern_storage/Ayush$ .venv\bin\activate
+bash: .venvbinactivate: command not found
+work@main1[Ayush]:~/intern_storage/Ayush$ 
