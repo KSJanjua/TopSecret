@@ -1,2 +1,56 @@
-(.venv) work@main1[Ayush]:~/intern_storage/Ayush$ ~/instancedepth_delivery/setup_repo.sh ~/flat_files ~/ instancedepth_delivery ~/InstanceDepthRepo
-bash: /home/work/instancedepth_delivery/setup_repo.sh: No such file or directory
+(.venv) work@main1[Ayush]:~/intern_storage/Ayush/InstanceDepthRepo$ python -m instancedepth.data_engine.run_generate --config instancedepth/configs/gid_custom.yaml --limit 1
+2026-06-12 15:02:34,438 data_engine.discover WARNING [Batch_1/20260120_100101] depth_npy: stem match failed and counts differ (rgb=204, depth=203); pairing the first 203 by sorted index.
+2026-06-12 15:02:34,439 data_engine.discover WARNING [Batch_1/20260120_100101] depth_png: stem match failed and counts differ (rgb=204, depth=203); pairing the first 203 by sorted index.
+2026-06-12 15:02:34,439 data_engine.discover WARNING [Batch_1/20260120_100101] frame zed_20260120_100101_204_left_rgb has no depth; dropped.
+2026-06-12 15:02:38,293 data_engine.discover WARNING [Batch_1/20260120_102524] depth_npy: stem match failed and counts differ (rgb=205, depth=201); pairing the first 201 by sorted index.
+2026-06-12 15:02:39,727 data_engine.discover WARNING [Batch_1/20260120_144118] depth_npy: stem match failed and counts differ (rgb=241, depth=240); pairing the first 240 by sorted index.
+2026-06-12 15:02:40,600 data_engine.discover WARNING [Batch_2/20260129_101106] depth_npy: stem match failed and counts differ (rgb=155, depth=154); pairing the first 154 by sorted index.
+2026-06-12 15:02:43,422 data_engine.discover INFO Discovered 65 sequences, 12098 frames total.
+/home/work/intern_storage/Ayush/sam3/sam3/model_builder.py:8: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  import pkg_resources
+/home/work/intern_storage/Ayush/.venv/lib/python3.12/site-packages/timm/models/layers/__init__.py:49: FutureWarning: Importing from timm.models.layers is deprecated, please import via timm.layers
+  warnings.warn(f"Importing from {__name__} is deprecated, please import via timm.layers", FutureWarning)
+INFO 2026-06-12 15:02:50,000 288216 sam3_video_predictor.py: 109: using the following GPU IDs: [0]
+INFO 2026-06-12 15:02:50,223 288216 sam3_video_predictor.py: 125: 
+
+
+        *** START loading model on all ranks ***
+
+
+INFO 2026-06-12 15:02:50,223 288216 sam3_video_predictor.py: 127: loading model on rank=0 with world_size=1 -- this could take a while ...
+INFO 2026-06-12 15:03:23,517 288216 sam3_video_base.py: 348: setting max_num_objects=10000 and num_obj_for_compile=16
+2026-06-12 15:03:26,482 httpx INFO HTTP Request: HEAD https://huggingface.co/facebook/sam3/resolve/main/config.json "HTTP/1.1 200 OK"
+2026-06-12 15:03:27,194 httpx INFO HTTP Request: HEAD https://huggingface.co/facebook/sam3/resolve/main/sam3.pt "HTTP/1.1 302 Found"
+INFO 2026-06-12 15:03:47,447 288216 sam3_video_predictor.py: 129: loading model on rank=0 with world_size=1 -- DONE locally
+INFO 2026-06-12 15:03:47,447 288216 sam3_video_predictor.py: 140: 
+
+
+        *** DONE loading model on all ranks ***
+
+
+2026-06-12 15:03:47,447 data_engine.run INFO === [1/1] Batch_1/20260120_094343 (150 frames) ===
+2026-06-12 15:03:47,477 data_engine.annotate INFO [Batch_1/20260120_094343] tracking concept 'person' ...
+frame loading (image folder) [rank=0]: 100%|███████████████████████████████████████████| 150/150 [00:23<00:00,  6.38it/s]
+INFO 2026-06-12 15:04:15,694 288216 sam3_base_predictor.py: 146: started new session 1951e8a5-6369-464f-b822-cbc67e0ccc20
+propagate_in_video: 100%|██████████████████████████████████████████████████████████████| 150/150 [00:41<00:00,  3.65it/s]
+0it [00:00, ?it/s]
+INFO 2026-06-12 15:05:00,870 288216 sam3_base_predictor.py: 305: propagation ended in session 1951e8a5-6369-464f-b822-cbc67e0ccc20
+INFO 2026-06-12 15:05:01,284 288216 sam3_base_predictor.py: 408: removed session 1951e8a5-6369-464f-b822-cbc67e0ccc20
+2026-06-12 15:05:01,284 data_engine.annotate INFO [Batch_1/20260120_094343] segmenting ground concept 'floor' ...
+frame loading (image folder) [rank=0]: 100%|███████████████████████████████████████████| 150/150 [00:23<00:00,  6.29it/s]
+INFO 2026-06-12 15:05:29,536 288216 sam3_base_predictor.py: 146: started new session 0cd584f7-e18b-4300-a1ac-d51cd847c79f
+propagate_in_video: 100%|██████████████████████████████████████████████████████████████| 150/150 [00:34<00:00,  4.37it/s]
+0it [00:00, ?it/s]
+INFO 2026-06-12 15:06:05,872 288216 sam3_base_predictor.py: 305: propagation ended in session 0cd584f7-e18b-4300-a1ac-d51cd847c79f
+INFO 2026-06-12 15:06:06,116 288216 sam3_base_predictor.py: 408: removed session 0cd584f7-e18b-4300-a1ac-d51cd847c79f
+2026-06-12 15:06:06,116 data_engine.annotate INFO [Batch_1/20260120_094343] segmenting ground concept 'ground' ...
+frame loading (image folder) [rank=0]: 100%|███████████████████████████████████████████| 150/150 [00:24<00:00,  6.16it/s]
+INFO 2026-06-12 15:06:34,768 288216 sam3_base_predictor.py: 146: started new session b38c7c15-1f9c-44f0-b791-25af4c675d38
+propagate_in_video: 100%|██████████████████████████████████████████████████████████████| 150/150 [00:24<00:00,  6.03it/s]
+0it [00:00, ?it/s]
+INFO 2026-06-12 15:06:59,952 288216 sam3_base_predictor.py: 305: propagation ended in session b38c7c15-1f9c-44f0-b791-25af4c675d38
+INFO 2026-06-12 15:07:00,208 288216 sam3_base_predictor.py: 408: removed session b38c7c15-1f9c-44f0-b791-25af4c675d38
+2026-06-12 15:07:00,209 data_engine.annotate INFO [Batch_1/20260120_094343] 3 tracks after identity post-processing.
+2026-06-12 15:07:00,275 data_engine.depth INFO [Batch_1/20260120_094343] depth unit auto-detect: median raw=3.49 -> scale=1
+2026-06-12 15:07:06,052 data_engine.run INFO Done: 1 videos, 150 frames, train/test = 1/0.
+(.venv) work@main1[Ayush]:~/intern_storage/Ayush/InstanceDepthRepo$ 
