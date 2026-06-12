@@ -1,22 +1,51 @@
-work@main1[Ayush]:~/intern_storage/Ayush/InstanceDepthRepo$ python -m instancedepth.data_engine.run_generate \
-> --config instancedepth/configs/gid_custom.yaml \
-> --only "Batch_2/20260129_100833"
-2026-06-12 15:53:46,193 data_engine.discover WARNING [Batch_1/20260120_100101] frame zed_20260120_100101_204_left_rgb has no depth; dropped.
-2026-06-12 15:53:55,302 data_engine.discover INFO Discovered 65 sequences, 12098 frames total.
-Traceback (most recent call last):
-  File "<frozen runpy>", line 198, in _run_module_as_main
-  File "<frozen runpy>", line 88, in _run_code
-  File "/home/work/intern_storage/Ayush/InstanceDepthRepo/instancedepth/data_engine/run_generate.py", line 221, in <module>
-    main()
-  File "/home/work/intern_storage/Ayush/InstanceDepthRepo/instancedepth/data_engine/run_generate.py", line 216, in main
-    generate(cfg, limit=args.limit, only=args.only,
-  File "/home/work/intern_storage/Ayush/InstanceDepthRepo/instancedepth/data_engine/run_generate.py", line 174, in generate
-    segmenter = build_segmenter(cfg.sam3)
-                ^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/work/intern_storage/Ayush/InstanceDepthRepo/instancedepth/data_engine/sam3_engine.py", line 281, in build_segmenter
-    return NativeSAM3Segmenter(cfg)
-           ^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/work/intern_storage/Ayush/InstanceDepthRepo/instancedepth/data_engine/sam3_engine.py", line 106, in __init__
-    from sam3.model_builder import build_sam3_video_predictor
-ModuleNotFoundError: No module named 'sam3'
-work@main1[Ayush]:~/intern_storage/Ayush/InstanceDepthRepo$ 
+(.venv) work@main1[Ayush]:~/intern_storage/Ayush/InstanceDepthRepo$ python -m instancedepth.data_engine.run_generate --config instancedepth/configs/gid_custom.yaml --only "Batch_2/20260129_100833"
+2026-06-12 16:43:56,843 data_engine.discover WARNING [Batch_1/20260120_100101] frame zed_20260120_100101_204_left_rgb has no depth; dropped.
+2026-06-12 16:44:05,537 data_engine.discover INFO Discovered 65 sequences, 12098 frames total.
+/home/work/intern_storage/Ayush/sam3/sam3/model_builder.py:8: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  import pkg_resources
+/home/work/intern_storage/Ayush/.venv/lib/python3.12/site-packages/timm/models/layers/__init__.py:49: FutureWarning: Importing from timm.models.layers is deprecated, please import via timm.layers
+  warnings.warn(f"Importing from {__name__} is deprecated, please import via timm.layers", FutureWarning)
+INFO 2026-06-12 16:44:11,248 303258 sam3_video_predictor.py: 109: using the following GPU IDs: [0]
+INFO 2026-06-12 16:44:11,476 303258 sam3_video_predictor.py: 125: 
+
+
+        *** START loading model on all ranks ***
+
+
+INFO 2026-06-12 16:44:11,476 303258 sam3_video_predictor.py: 127: loading model on rank=0 with world_size=1 -- this could take a while ...
+INFO 2026-06-12 16:44:47,110 303258 sam3_video_base.py: 348: setting max_num_objects=10000 and num_obj_for_compile=16
+2026-06-12 16:44:48,576 httpx INFO HTTP Request: HEAD https://huggingface.co/facebook/sam3/resolve/main/config.json "HTTP/1.1 200 OK"
+2026-06-12 16:44:48,938 httpx INFO HTTP Request: HEAD https://huggingface.co/facebook/sam3/resolve/main/sam3.pt "HTTP/1.1 302 Found"
+INFO 2026-06-12 16:45:09,580 303258 sam3_video_predictor.py: 129: loading model on rank=0 with world_size=1 -- DONE locally
+INFO 2026-06-12 16:45:09,580 303258 sam3_video_predictor.py: 140: 
+
+
+        *** DONE loading model on all ranks ***
+
+
+2026-06-12 16:45:09,581 data_engine.run INFO === [1/1] Batch_2/20260129_100833 (278 frames) ===
+2026-06-12 16:45:09,611 data_engine.annotate INFO [Batch_2/20260129_100833] tracking concept 'person' ...
+frame loading (image folder) [rank=0]: 100%|████████████████████████████████████████████████████████████████| 278/278 [00:46<00:00,  6.03it/s]
+INFO 2026-06-12 16:46:04,177 303258 sam3_base_predictor.py: 146: started new session 1cff2206-e1b6-4d9f-8288-9fb24b4a85aa
+propagate_in_video: 100%|███████████████████████████████████████████████████████████████████████████████████| 278/278 [01:18<00:00,  3.53it/s]
+0it [00:00, ?it/s]
+INFO 2026-06-12 16:47:29,917 303258 sam3_base_predictor.py: 305: propagation ended in session 1cff2206-e1b6-4d9f-8288-9fb24b4a85aa
+INFO 2026-06-12 16:47:30,367 303258 sam3_base_predictor.py: 408: removed session 1cff2206-e1b6-4d9f-8288-9fb24b4a85aa
+2026-06-12 16:47:30,369 data_engine.annotate INFO [Batch_2/20260129_100833] segmenting ground concept 'floor' ...
+frame loading (image folder) [rank=0]: 100%|████████████████████████████████████████████████████████████████| 278/278 [00:46<00:00,  5.93it/s]
+INFO 2026-06-12 16:48:25,801 303258 sam3_base_predictor.py: 146: started new session 6990ee32-b700-494c-a7f5-98b2d7f3bde7
+propagate_in_video: 100%|███████████████████████████████████████████████████████████████████████████████████| 278/278 [01:01<00:00,  4.51it/s]
+0it [00:00, ?it/s]
+INFO 2026-06-12 16:49:27,800 303258 sam3_base_predictor.py: 305: propagation ended in session 6990ee32-b700-494c-a7f5-98b2d7f3bde7
+INFO 2026-06-12 16:49:28,189 303258 sam3_base_predictor.py: 408: removed session 6990ee32-b700-494c-a7f5-98b2d7f3bde7
+2026-06-12 16:49:28,192 data_engine.annotate INFO [Batch_2/20260129_100833] segmenting ground concept 'ground' ...
+frame loading (image folder) [rank=0]: 100%|████████████████████████████████████████████████████████████████| 278/278 [00:49<00:00,  5.63it/s]
+INFO 2026-06-12 16:50:26,080 303258 sam3_base_predictor.py: 146: started new session 6c6666b5-de53-43cf-8cf9-7a1956ac205a
+propagate_in_video: 100%|███████████████████████████████████████████████████████████████████████████████████| 278/278 [01:08<00:00,  4.08it/s]
+0it [00:00, ?it/s]
+INFO 2026-06-12 16:51:34,621 303258 sam3_base_predictor.py: 305: propagation ended in session 6c6666b5-de53-43cf-8cf9-7a1956ac205a
+INFO 2026-06-12 16:51:35,002 303258 sam3_base_predictor.py: 408: removed session 6c6666b5-de53-43cf-8cf9-7a1956ac205a
+2026-06-12 16:51:35,004 data_engine.annotate INFO [Batch_2/20260129_100833] 3 tracks after identity post-processing.
+2026-06-12 16:51:35,060 data_engine.depth INFO [Batch_2/20260129_100833] depth unit auto-detect: median raw=7.65 -> scale=1
+2026-06-12 16:51:44,621 data_engine.run INFO Partial run complete. Split/meta NOT updated; run with --finalize after all sequences are annotated.
+(.venv) work@main1[Ayush]:~/intern_storage/Ayush/InstanceDepthRepo$ 
