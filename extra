@@ -1,51 +1,233 @@
-(.venv) work@main1[Ayush]:~/intern_storage/Ayush/InstanceDepthRepo$ python -m instancedepth.data_engine.run_generate --config instancedepth/configs/gid_custom.yaml --only "Batch_2/20260129_100833"
-2026-06-12 16:43:56,843 data_engine.discover WARNING [Batch_1/20260120_100101] frame zed_20260120_100101_204_left_rgb has no depth; dropped.
-2026-06-12 16:44:05,537 data_engine.discover INFO Discovered 65 sequences, 12098 frames total.
+(.venv) work@main1[Ayush]:~/intern_storage/Ayush/InstanceDepthRepo$ python -m instancedepth.data_engine.run_generate --config instancedepth/configs/gid_custom.yaml --only "Batch_2/20260129_101656"
+2026-06-12 17:52:55,432 data_engine.discover WARNING [Batch_1/20260120_100101] frame zed_20260120_100101_204_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,973 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_1_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,973 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_2_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,974 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_3_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,974 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_10_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,974 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_11_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,974 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_12_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,974 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_13_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,974 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_14_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,974 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_15_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,975 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_16_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,975 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_17_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,975 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_18_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,975 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_19_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,975 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_20_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,975 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_21_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,976 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_22_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,976 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_23_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,976 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_24_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,976 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_25_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,976 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_26_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,976 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_27_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,976 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_28_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,976 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_29_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,977 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_30_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,977 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_31_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,977 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_32_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,977 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_33_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,977 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_34_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,977 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_35_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,978 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_36_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,978 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_37_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,978 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_38_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,978 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_39_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,979 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_40_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,979 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_41_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,979 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_42_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,979 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_43_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,979 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_44_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,979 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_45_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,979 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_46_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,979 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_47_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,979 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_100_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,979 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_101_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,979 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_102_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,979 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_103_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,979 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_104_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,979 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_105_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,979 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_106_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,979 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_107_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,979 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_108_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,979 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_109_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,979 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_110_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,979 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_111_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,979 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_112_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,979 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_113_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,979 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_114_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,980 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_115_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,980 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_116_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,980 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_117_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,980 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_118_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,980 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_119_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,980 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_120_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,980 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_121_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,980 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_122_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,980 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_123_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,980 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_124_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,980 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_125_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,980 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_126_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,980 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_127_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,980 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_128_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,980 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_129_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,980 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_130_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,980 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_131_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,980 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_132_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,980 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_133_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,980 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_134_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,980 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_135_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,980 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_136_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,980 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_137_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,980 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_138_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,980 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_139_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,980 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_140_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,980 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_141_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,980 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_142_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,980 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_143_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,980 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_144_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,980 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_145_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,980 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_146_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,980 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_147_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,980 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_148_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,980 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_149_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,980 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_150_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,980 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_151_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,980 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_152_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,980 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_153_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,980 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_154_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,980 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_155_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,980 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_156_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,980 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_157_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,980 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_158_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,980 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_159_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,981 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_160_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,981 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_161_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,981 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_162_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,981 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_163_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,981 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_164_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,981 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_165_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,981 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_166_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,981 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_167_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,981 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_168_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,981 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_169_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,981 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_170_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,981 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_171_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,981 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_172_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,981 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_173_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,981 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_174_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,981 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_175_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,981 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_176_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,981 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_177_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,981 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_178_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,981 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_179_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,981 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_180_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,981 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_181_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,981 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_182_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,981 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_183_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,981 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_184_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,981 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_185_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,981 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_186_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,981 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_187_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,981 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_188_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,981 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_189_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,981 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_190_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,981 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_191_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,981 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_192_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,981 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_193_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,981 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_194_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,981 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_195_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,981 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_196_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,981 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_197_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,981 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_198_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,981 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_199_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,981 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_200_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,981 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_201_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,981 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_202_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,981 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_203_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,981 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_204_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,981 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_205_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,982 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_206_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,982 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_207_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,982 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_208_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,982 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_209_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,982 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_210_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,982 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_211_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,982 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_212_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,982 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_213_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,982 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_214_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,982 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_215_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,982 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_216_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,982 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_217_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,982 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_218_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,982 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_219_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,982 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_220_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,982 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_221_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,982 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_222_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,982 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_223_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,982 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_224_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,982 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_225_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,982 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_226_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,982 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_227_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,982 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_228_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,982 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_229_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,982 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_230_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,982 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_231_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,982 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_232_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,982 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_233_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,982 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_234_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,982 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_235_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,982 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_236_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,982 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_237_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,982 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_238_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,982 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_239_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,982 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_240_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,982 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_241_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,982 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_242_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,982 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_243_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,982 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_244_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,982 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_245_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,982 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_246_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,982 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_247_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,982 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_248_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,982 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_249_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,982 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_250_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,982 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_251_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,982 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_252_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,983 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_253_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,983 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_254_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,983 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_255_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,983 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_256_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,983 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_257_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,983 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_258_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,983 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_259_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,983 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_260_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,983 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_261_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,983 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_262_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,983 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_263_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,983 data_engine.discover WARNING [Batch_5/20260205_150351] frame zed_20260205_150351_264_left_rgb has no depth; dropped.
+2026-06-12 17:53:05,983 data_engine.discover INFO Discovered 81 sequences, 14334 frames total.
 /home/work/intern_storage/Ayush/sam3/sam3/model_builder.py:8: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
   import pkg_resources
 /home/work/intern_storage/Ayush/.venv/lib/python3.12/site-packages/timm/models/layers/__init__.py:49: FutureWarning: Importing from timm.models.layers is deprecated, please import via timm.layers
   warnings.warn(f"Importing from {__name__} is deprecated, please import via timm.layers", FutureWarning)
-INFO 2026-06-12 16:44:11,248 303258 sam3_video_predictor.py: 109: using the following GPU IDs: [0]
-INFO 2026-06-12 16:44:11,476 303258 sam3_video_predictor.py: 125: 
+INFO 2026-06-12 17:53:12,343 333695 sam3_video_predictor.py: 109: using the following GPU IDs: [0]
+INFO 2026-06-12 17:53:12,574 333695 sam3_video_predictor.py: 125: 
 
 
         *** START loading model on all ranks ***
 
 
-INFO 2026-06-12 16:44:11,476 303258 sam3_video_predictor.py: 127: loading model on rank=0 with world_size=1 -- this could take a while ...
-INFO 2026-06-12 16:44:47,110 303258 sam3_video_base.py: 348: setting max_num_objects=10000 and num_obj_for_compile=16
-2026-06-12 16:44:48,576 httpx INFO HTTP Request: HEAD https://huggingface.co/facebook/sam3/resolve/main/config.json "HTTP/1.1 200 OK"
-2026-06-12 16:44:48,938 httpx INFO HTTP Request: HEAD https://huggingface.co/facebook/sam3/resolve/main/sam3.pt "HTTP/1.1 302 Found"
-INFO 2026-06-12 16:45:09,580 303258 sam3_video_predictor.py: 129: loading model on rank=0 with world_size=1 -- DONE locally
-INFO 2026-06-12 16:45:09,580 303258 sam3_video_predictor.py: 140: 
+INFO 2026-06-12 17:53:12,574 333695 sam3_video_predictor.py: 127: loading model on rank=0 with world_size=1 -- this could take a while ...
+INFO 2026-06-12 17:53:44,105 333695 sam3_video_base.py: 348: setting max_num_objects=10000 and num_obj_for_compile=16
+2026-06-12 17:53:44,375 httpx INFO HTTP Request: HEAD https://huggingface.co/facebook/sam3/resolve/main/config.json "HTTP/1.1 200 OK"
+2026-06-12 17:53:44,603 httpx INFO HTTP Request: HEAD https://huggingface.co/facebook/sam3/resolve/main/sam3.pt "HTTP/1.1 302 Found"
+INFO 2026-06-12 17:54:07,564 333695 sam3_video_predictor.py: 129: loading model on rank=0 with world_size=1 -- DONE locally
+INFO 2026-06-12 17:54:07,565 333695 sam3_video_predictor.py: 140: 
 
 
         *** DONE loading model on all ranks ***
 
 
-2026-06-12 16:45:09,581 data_engine.run INFO === [1/1] Batch_2/20260129_100833 (278 frames) ===
-2026-06-12 16:45:09,611 data_engine.annotate INFO [Batch_2/20260129_100833] tracking concept 'person' ...
-frame loading (image folder) [rank=0]: 100%|████████████████████████████████████████████████████████████████| 278/278 [00:46<00:00,  6.03it/s]
-INFO 2026-06-12 16:46:04,177 303258 sam3_base_predictor.py: 146: started new session 1cff2206-e1b6-4d9f-8288-9fb24b4a85aa
-propagate_in_video: 100%|███████████████████████████████████████████████████████████████████████████████████| 278/278 [01:18<00:00,  3.53it/s]
-0it [00:00, ?it/s]
-INFO 2026-06-12 16:47:29,917 303258 sam3_base_predictor.py: 305: propagation ended in session 1cff2206-e1b6-4d9f-8288-9fb24b4a85aa
-INFO 2026-06-12 16:47:30,367 303258 sam3_base_predictor.py: 408: removed session 1cff2206-e1b6-4d9f-8288-9fb24b4a85aa
-2026-06-12 16:47:30,369 data_engine.annotate INFO [Batch_2/20260129_100833] segmenting ground concept 'floor' ...
-frame loading (image folder) [rank=0]: 100%|████████████████████████████████████████████████████████████████| 278/278 [00:46<00:00,  5.93it/s]
-INFO 2026-06-12 16:48:25,801 303258 sam3_base_predictor.py: 146: started new session 6990ee32-b700-494c-a7f5-98b2d7f3bde7
-propagate_in_video: 100%|███████████████████████████████████████████████████████████████████████████████████| 278/278 [01:01<00:00,  4.51it/s]
-0it [00:00, ?it/s]
-INFO 2026-06-12 16:49:27,800 303258 sam3_base_predictor.py: 305: propagation ended in session 6990ee32-b700-494c-a7f5-98b2d7f3bde7
-INFO 2026-06-12 16:49:28,189 303258 sam3_base_predictor.py: 408: removed session 6990ee32-b700-494c-a7f5-98b2d7f3bde7
-2026-06-12 16:49:28,192 data_engine.annotate INFO [Batch_2/20260129_100833] segmenting ground concept 'ground' ...
-frame loading (image folder) [rank=0]: 100%|████████████████████████████████████████████████████████████████| 278/278 [00:49<00:00,  5.63it/s]
-INFO 2026-06-12 16:50:26,080 303258 sam3_base_predictor.py: 146: started new session 6c6666b5-de53-43cf-8cf9-7a1956ac205a
-propagate_in_video: 100%|███████████████████████████████████████████████████████████████████████████████████| 278/278 [01:08<00:00,  4.08it/s]
-0it [00:00, ?it/s]
-INFO 2026-06-12 16:51:34,621 303258 sam3_base_predictor.py: 305: propagation ended in session 6c6666b5-de53-43cf-8cf9-7a1956ac205a
-INFO 2026-06-12 16:51:35,002 303258 sam3_base_predictor.py: 408: removed session 6c6666b5-de53-43cf-8cf9-7a1956ac205a
-2026-06-12 16:51:35,004 data_engine.annotate INFO [Batch_2/20260129_100833] 3 tracks after identity post-processing.
-2026-06-12 16:51:35,060 data_engine.depth INFO [Batch_2/20260129_100833] depth unit auto-detect: median raw=7.65 -> scale=1
-2026-06-12 16:51:44,621 data_engine.run INFO Partial run complete. Split/meta NOT updated; run with --finalize after all sequences are annotated.
-(.venv) work@main1[Ayush]:~/intern_storage/Ayush/InstanceDepthRepo$ 
+2026-06-12 17:54:07,565 data_engine.run INFO === [1/1] Batch_2/20260129_101656 (274 frames) ===
+2026-06-12 17:54:07,609 data_engine.annotate INFO [Batch_2/20260129_101656] tracking concept 'person' .
