@@ -1,0 +1,30 @@
+python3 - << 'PY'
+import cv2, numpy as np, glob, os
+
+GID_ROOT = "gid_custom"                 # your annotations root
+OUT_SUBDIR = "object_masks_colored"     # created inside each sequence folder
+
+# Fixed color palette — same track ID always gets the same color (good for video consistency).
+# Index 0 = background = black. Colors are BGR (OpenCV order).
+rng = np.random.default_rng(42)
+PALETTE = np.zeros((256, 3), dtype=np.uint8)
+PALETTE[1:] = rng.integers(60, 256, size=(255, 3))   # bright, avoid dark colors
+
+mask_files = sorted(glob.glob(f"{GID_ROOT}/*/*/object_masks/*.png"))
+print(f"Found {len(mask_files)} object masks")
+
+for mf in mask_files:
+    m = cv2.imread(mf, cv2.IMREAD_UNCHANGED)          # uint16, pixel = track ID
+    if m is None:
+        continue
+    color = PALETTE[np.clip(m, 0, 255)]               # map each ID to its color
+    out_dir = mf.replace("/object_masks/", f"/{OUT_SUBDIR}/").rsplit("/", 1)[0]
+    os.makedirs(out_dir, exist_ok=True)
+    cv2.imwrite(os.path.join(out_dir, os.path.basename(mf)), color)
+
+print(f"Done. Colored masks saved to <sequence>/{OUT_SUBDIR}/")
+PY
+
+
+python -m instancedepth.data_engine.run_generate \
+    --config instancedepth/configs/gid_custom.yaml --finalize
