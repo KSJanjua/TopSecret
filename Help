@@ -1,30 +1,36 @@
-python3 - << 'PY'
-import cv2, numpy as np, glob, os
+curl -sS -I https://huggingface.co        2>&1 | head -1   # works (your log shows 302/200)
+curl -sS -I https://us.aws.cdn.hf.co      2>&1 | head -1   # the blocked CDN -> expect 403/timeout
+curl -sS -I https://hf-mirror.com         2>&1 | head -1   # reachable? then the mirror trick below works
 
-GID_ROOT = "gid_custom"                 # your annotations root
-OUT_SUBDIR = "object_masks_colored"     # created inside each sequence folder
+export HF_ENDPOINT=https://hf-mirror.com
+export HF_HUB_DISABLE_XET=1
+python -c "import timm; m=timm.create_model('vit_large_patch14_dinov2.lvd142m',pretrained=True,num_classes=0); print('OK', m.embed_dim)"
 
-# Fixed color palette — same track ID always gets the same color (good for video consistency).
-# Index 0 = background = black. Colors are BGR (OpenCV order).
-rng = np.random.default_rng(42)
-PALETTE = np.zeros((256, 3), dtype=np.uint8)
-PALETTE[1:] = rng.integers(60, 256, size=(255, 3))   # bright, avoid dark colors
+curl -L -o dinov2_vitl14.safetensors \
+  https://huggingface.co/timm/vit_large_patch14_dinov2.lvd142m/resolve/main/model.safetensors
+# then copy it to the cluster:
+scp dinov2_vitl14.safetensors \
+  work@<cluster>:/home/work/intern_storage/Ayush/weights/dinov2_vitl14.safetensors
 
-mask_files = sorted(glob.glob(f"{GID_ROOT}/*/*/object_masks/*.png"))
-print(f"Found {len(mask_files)} object masks")
+import timm  # local import: package imports cleanly even without timm
+        import os
 
-for mf in mask_files:
-    m = cv2.imread(mf, cv2.IMREAD_UNCHANGED)          # uint16, pixel = track ID
-    if m is None:
-        continue
-    color = PALETTE[np.clip(m, 0, 255)]               # map each ID to its color
-    out_dir = mf.replace("/object_masks/", f"/{OUT_SUBDIR}/").rsplit("/", 1)[0]
-    os.makedirs(out_dir, exist_ok=True)
-    cv2.imwrite(os.path.join(out_dir, os.path.basename(mf)), color)
+        _overlay = None
+        _w = os.environ.get("DINOV2_WEIGHTS")     # local DINOv2 weights for offline clusters
+        if _w:
+            _overlay = dict(file=_w)
 
-print(f"Done. Colored masks saved to <sequence>/{OUT_SUBDIR}/")
-PY
+        self.vit = timm.create_model(
+            cfg.model_name,
+            pretrained=cfg.pretrained,
+            num_classes=0,
+            dynamic_img_size=True,
+            pretrained_cfg_overlay=_overlay,       # None by default -> normal behavior
+        )
 
+export DINOV2_WEIGHTS=/home/work/intern_storage/Ayush/weights/dinov2_vitl14.safetensors
+python -c "import timm,os; m=timm.create_model('vit_large_patch14_dinov2.lvd142m',pretrained=True,num_classes=0,pretrained_cfg_overlay=dict(file=os.environ['DINOV2_WEIGHTS'])); print('OK',m.embed_dim)"
 
-python -m instancedepth.data_engine.run_generate \
-    --config instancedepth/configs/gid_custom.yaml --finalize
+python train.py --model-config instancedepth/configs/instance_depth.yaml \
+    --data-root gid_Custom --phase 1 --image-size 504 896 --batch-size 4 --out runs/phase1
+
