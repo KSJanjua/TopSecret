@@ -1,10 +1,48 @@
-# pane 1:
-tmux new -s p1
+cd /home/work/intern_storage/Ayush/InstanceDepthRepo
+python - <<'PY'
+import json, glob, os, numpy as np, cv2
+root = "gid_custom"
+bad = []
+for ann in glob.glob(os.path.join(root, "**", "annotations.json"), recursive=True):
+    seq = os.path.dirname(ann)
+    d = json.load(open(ann))
+    frames = d.get("frames", d)            # dict of frame -> record
+    recs = frames.values() if isinstance(frames, dict) else frames
+    for r in recs:
+        for key in ("depth_npy","depth_png","depth","depth_path","npy","png"):
+            p = r.get(key) if isinstance(r, dict) else None
+            if not p: continue
+            fp = p if os.path.isabs(p) else os.path.join(seq, p)
+            if not os.path.exists(fp): continue
+            try:
+                if fp.endswith(".npy"):
+                    a = np.load(fp, mmap_mode="r"); shp = a.shape
+                else:
+                    a = cv2.imread(fp, cv2.IMREAD_UNCHANGED); shp = None if a is None else a.shape
+            except Exception as e:
+                bad.append((fp, f"read-error {e}")); continue
+            if shp is not None and len(shp) == 3:        # HxWx3 -> not a depth map
+                bad.append((fp, f"shape {shp}"))
+print(f"checked dirs under {root}; suspND depth files: {len(bad)}")
+for fp, why in bad[:40]:
+    print("  ", why, fp)
+PY
+
+Fix options (pick one)
+A — Make the loader robust (recommended; fixes this and any future stragglers). Squeeze a stray channel dimension down to single-channel right where depth is read, in gid_dataset.py. Find the depth-loading spot (search for where it builds the depth tensor / b["depth"], near _load_depth or in __getitem__) and coerce to 2-D before it becomes a tensor:
+Python
+# after loading the depth array `depth` (HxW expected), before resize/tensor:
+if depth.ndim == 3:
+    depth = depth[..., 0]          # take first channel; a real depth map has identical channels
+
+If a .npy is genuinely HxWx3 of a colorized map, the first channel isn't true depth — so this only safely rescues cases where the three channels are identical (a grayscale depth saved as 3-channel). For a real colorized-RGB depth, the file is bad data and option B is correct.
+B — Fix/remove the offending file. If the script shows it's an actual RGB image mislabeled as depth, that frame has no real depth GT. Either regenerate that sequence's depth, or drop that one frame from its annotations.json so it's never sampled. Given it's likely 1–2 files out of 50k, dropping them costs nothing.
+I'd do both: add the ndim==3 guard in the loader (so training never crashes on a stray channel again), and run the scan to confirm how many files are affected and whether any are genuinely colorized (which you'd want to regenerate).
+Then resume — don't restart from zero
+You have runs/phase1/ckpt_004000.pth (last save before the crash at 5550). Resume from it so you keep those 4000 steps:
+Bash
 export DINOV2_WEIGHTS=/home/work/intern_storage/Ayush/weights/dinov2_vitl14.safetensors
 export HF_HUB_OFFLINE=1
 python train.py --model-config instancedepth/configs/instance_depth.yaml \
     --data-root gid_custom --phase 1 --image-size 504 896 --batch-size 4 \
-    --save-every 2000 --out runs/phase1
-
-# pane 2 (Ctrl-b " to split): watch host RAM stay flat now
-watch -n 10 free -h
+    --save-every 2000 --out runs/phase1 --resume runs/phase1/ckpt_004000.pth
