@@ -1,0 +1,30 @@
+cd /home/work/intern_storage/Ayush/InstanceDepthRepo
+python - <<'PY' | tee /tmp/depth_diag.txt
+import json, os, numpy as np
+root = "gid_custom"; ids = []
+for s in ("train", "test"):
+    p = os.path.join(root, f"{s}.txt")
+    if os.path.exists(p): ids += [x.strip() for x in open(p) if x.strip()]
+
+n_npy = 0; fallback = []; npy_bad = []
+for sid in ids:
+    man = json.load(open(os.path.join(root, sid, "annotations.json")))
+    for fkey, fr in man["frames"].items():
+        p = fr.get("depth_npy")
+        if p:                                   # frame would use npy
+            if not os.path.exists(p):
+                fallback.append((sid, fkey, "npy-MISSING-on-disk", p))
+            else:
+                n_npy += 1
+                if len(np.load(p, mmap_mode="r").shape) != 2:
+                    npy_bad.append((sid, fkey, p))
+        else:                                   # no npy -> falls back to 3-ch PNG (crash)
+            fallback.append((sid, fkey, "no depth_npy key -> 3ch PNG", fr.get("depth_png")))
+
+print(f"frames using a valid 2-D npy : {n_npy}")
+print(f"npy files that are NOT 2-D   : {len(npy_bad)}")
+for x in npy_bad[:20]: print("   NPY-NOT-2D:", x)
+print(f"frames forced to PNG fallback (the crash source): {len(fallback)}")
+for x in fallback[:30]: print("   FALLBACK:", x)
+PY
+echo "===== copy from here ====="; cat /tmp/depth_diag.txt
