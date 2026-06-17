@@ -1,63 +1,10 @@
-Good — the file is on the cluster. Here's the exact sequence from here.
-Step 1 — Confirm the file transferred intact
-A truncated scp or a bad laptop download would silently give you a broken file, so verify before anything else:
-Bash
+# pane 1:
+tmux new -s p1
 export DINOV2_WEIGHTS=/home/work/intern_storage/Ayush/weights/dinov2_vitl14.safetensors
-ls -lh "$DINOV2_WEIGHTS"          # must be ~1.2G  (NOT a few hundred bytes)
-
-Then prove it actually loads as DINOv2 weights — this passes the file directly, so it needs no code change and makes no network call:
-Bash
-python -c "import timm,os; m=timm.create_model('vit_large_patch14_dinov2.lvd142m',pretrained=True,num_classes=0,pretrained_cfg_overlay=dict(file=os.environ['DINOV2_WEIGHTS'])); print('OK', m.embed_dim)"
-
-Expect OK 1024. If you instead get a safetensors/format error, the file is corrupt or incomplete — re-download on the laptop with curl -L --fail and re-copy. Don't proceed until this prints OK 1024.
-Step 2 — Make sure train.py will use the file
-The one-liner above worked because it passed the file explicitly. For train.py to do the same, the backbone must read DINOV2_WEIGHTS. Check whether that edit is in place:
-Bash
-grep -n DINOV2_WEIGHTS instancedepth/models/backbone/dinov2_dpt.py
-
-If it prints nothing, apply it now — open instancedepth/models/backbone/dinov2_dpt.py and change the timm.create_model(...) block to:
-Python
-import timm  # local import: package imports cleanly even without timm
-        import os
-
-        _overlay = None
-        _w = os.environ.get("DINOV2_WEIGHTS")     # local DINOv2 weights (offline cluster)
-        if _w:
-            _overlay = dict(file=_w)
-
-        self.vit = timm.create_model(
-            cfg.model_name,
-            pretrained=cfg.pretrained,
-            num_classes=0,
-            dynamic_img_size=True,
-            pretrained_cfg_overlay=_overlay,       # None -> normal behavior
-        )
-
-(If the grep already shows these lines, it's done — skip.)
-Step 3 — Make the env vars persistent
-So phases 2/3 and any re-run use the file without thinking about it:
-Bash
-echo 'export DINOV2_WEIGHTS=/home/work/intern_storage/Ayush/weights/dinov2_vitl14.safetensors' >> ~/.bashrc
-echo 'export HF_HUB_OFFLINE=1' >> ~/.bashrc      # belt-and-suspenders: forbid any stray HF call
-unset HF_ENDPOINT                                 # clear the hf-mirror value if you set it earlier
-source ~/.bashrc
-
-HF_HUB_OFFLINE=1 is safe here — the local-file load makes no HF request (that's why it worked in Step 1), so this just guarantees nothing ever hangs on the Samsung proxy again.
-Step 4 — Confirm the dataset folder name for --data-root
-This is the next thing that will break, since you've been passing gid_Custom but your configs say lowercase gid_custom. Find the directory that actually holds your generated dataset (the one with meta.json):
-Bash
-find . -maxdepth 2 -name meta.json 2>/dev/null
-
-Whatever directory that prints is your --data-root. Sanity-check it has the split files too:
-Bash
-ls <that_dir>/train.txt <that_dir>/test.txt <that_dir>/meta.json
-
-Step 5 — Launch Phase 1
-Use the exact directory from Step 4 (shown here as gid_custom — substitute yours):
-Bash
+export HF_HUB_OFFLINE=1
 python train.py --model-config instancedepth/configs/instance_depth.yaml \
-    --data-root gid_custom --phase 1 --image-size 504 896 --batch-size 4 --out runs/phase1
+    --data-root gid_custom --phase 1 --image-size 504 896 --batch-size 4 \
+    --save-every 2000 --out runs/phase1
 
-
-What you should see: no HuggingFace download lines this time (weights load instantly from disk), then the model builds and per-iteration logs begin (loss, with siglog and range terms decreasing). That means Phase 1 is training. With your 40 GB GPU, batch 4 is comfortable; if utilization is low you can bump it later.
-Once Phase 1 is running cleanly, the chain is Phase 2 (--init-from runs/phase1/ckpt_final.pth) then Phase 3, exactly as in the runbook. Paste the next traceback if one appears and I'll trace it the same way — but with the weights resolved, the remaining risks are just the data-root name and (later, in Phase 2) the matcher patch you already verified.
+# pane 2 (Ctrl-b " to split): watch host RAM stay flat now
+watch -n 10 free -h
