@@ -1,5 +1,18 @@
 cd /home/work/intern_storage/Ayush/InstanceDepthRepo
-find . -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null
-grep -n "valid.any" instancedepth/losses/instance_losses.py        # Fix A present?
-grep -n "attn.all" instancedepth/models/instance/transformer_decoder.py  # Fix B present?
-grep -n "update skipped" train.py                                  # Fix C present?
+python - <<'PY'
+import json, os, numpy as np
+root="gid_custom"; ids=[]
+for s in ("train","test"):
+    p=os.path.join(root,f"{s}.txt")
+    if os.path.exists(p): ids+=[x.strip() for x in open(p) if x.strip()]
+total=bad=0
+for sid in ids:
+    man=json.load(open(os.path.join(root,sid,"annotations.json")))
+    for fr in man["frames"].values():
+        for inst in fr["instances"]:
+            total+=1
+            d=float(inst.get("depth_layer_m", 0.0))
+            if not (np.isfinite(d) and d>0): bad+=1
+print(f"person-instances total: {total}")
+print(f"with invalid depth layer (excluded from depth loss only): {bad}  ({100*bad/max(total,1):.3f}%)")
+PY
