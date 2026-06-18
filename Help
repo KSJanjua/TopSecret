@@ -1,8 +1,5 @@
-optim.zero_grad(set_to_none=True)
-        loss.backward()
-        grad_norm = torch.nn.utils.clip_grad_norm_(params, args.clip_grad)
-        if torch.isfinite(grad_norm):
-            optim.step()
-        else:
-            log.warning("step %d: non-finite grad norm (%.3e) -- update skipped",
-                        step, float(grad_norm))
+cd /home/work/intern_storage/Ayush/InstanceDepthRepo
+find . -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null
+grep -n "valid.any" instancedepth/losses/instance_losses.py        # Fix A present?
+grep -n "attn.all" instancedepth/models/instance/transformer_decoder.py  # Fix B present?
+grep -n "update skipped" train.py                                  # Fix C present?
