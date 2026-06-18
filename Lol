@@ -8,3 +8,8 @@ screen -S p3
 python train.py --model-config instancedepth/configs/instance_depth.yaml \
     --data-root gid_custom --phase 3 --image-size 504 896 --batch-size 4 \
     --save-every 2000 --init-from runs/phase2/ckpt_final.pth --out runs/phase3
+
+
+python evaluate.py --model-config instancedepth/configs/instance_depth.yaml \
+    --data-root gid_custom --checkpoint runs/phase2/ckpt_final.pth \
+    --split test --image-size 504 896 --out-json eval_phase2.json
