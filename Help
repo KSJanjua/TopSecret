@@ -1,28 +1,11 @@
 cd /home/work/intern_storage/Ayush/InstanceDepthRepo
-python - <<'PY'
-import torch, yaml
-torch.autograd.set_detect_anomaly(True)
-from instancedepth.build import build_instance_depth
-from instancedepth.data.gid_dataset import GIDInstanceDepthDataset, GIDDatasetConfig, collate_gid
-from torch.utils.data import DataLoader
-
-cfg = yaml.safe_load(open("instancedepth/configs/instance_depth.yaml"))
-cfg.setdefault("backbone", {})["pretrained"] = False
-m = build_instance_depth(cfg).cuda()
-from instancedepth.utils.checkpoint import load_checkpoint
-load_checkpoint("runs/phase1/ckpt_final.pth", m)
-m.set_phase(2)
-
-ds = GIDInstanceDepthDataset(GIDDatasetConfig(annotations_root="gid_custom", split="train", image_size=(504,896)))
-dl = DataLoader(ds, batch_size=2, shuffle=True, num_workers=2, collate_fn=collate_gid, drop_last=True)
-
-for i, b in enumerate(dl):
-    out = m(b["image"].cuda(), run_instance=True, run_refine=False)
-    for k in ("pred_masks","pred_logits","pred_depth"):
-        v = out[k]
-        print(f"step {i} {k}: finite={torch.isfinite(v).all().item()} "
-              f"min={v.min().item():.3f} max={v.max().item():.3f}")
-    if not all(torch.isfinite(out[k]).all() for k in ("pred_masks","pred_logits","pred_depth")):
-        print(">>> first non-finite at step", i); break
-    if i >= 5: print("5 forward passes finite — issue is in the loss/backward, see Step 2"); break
+PYTHONFAULTHANDLER=1 python -X faulthandler - <<'PY'
+import torch, runpy, sys
+torch.autograd.set_detect_anomaly(True)          # make autograd point at the bad op
+sys.argv = ["train.py",
+            "--model-config","instancedepth/configs/instance_depth.yaml",
+            "--data-root","gid_custom","--phase","2","--image-size","504","896",
+            "--batch-size","2","--init-from","runs/phase1/ckpt_final.pth",
+            "--out","runs/phase2_debug"]
+runpy.run_path("train.py", run_name="__main__")
 PY
