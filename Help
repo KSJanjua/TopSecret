@@ -1,56 +1,13 @@
-def forward(
-        self,
-        outputs: Dict[str, torch.Tensor],
-        targets: List[Dict[str, torch.Tensor]],
-        indices: List[Tuple[torch.Tensor, torch.Tensor]],
-    ) -> Dict[str, torch.Tensor]:
-        b, n = outputs["pred_logits"].shape[:2]
-        device = outputs["pred_logits"].device
-        no_obj = self.num_classes                    # no-object class index
-
-        # ---- classification loss over all queries ----
-        target_classes = torch.full((b, n), no_obj, dtype=torch.long, device=device)
-        for i, (pi, gi) in enumerate(indices):
-            if pi.numel():
-                target_classes[i, pi] = targets[i]["labels"][gi].to(device)
-        loss_class = F.cross_entropy(
-            outputs["pred_logits"].transpose(1, 2), target_classes,
-            weight=self.class_weight.to(device))
-
-        # ---- mask + depth losses on matched pairs only ----
-        mask_logits_all, mask_tgt_all, pred_d_all, tgt_d_all = [], [], [], []
-        for i, (pi, gi) in enumerate(indices):
-            if pi.numel() == 0:
-                continue
-            pm = outputs["pred_masks"][i][pi]                          # (M, Hf, Wf)
-            tm = targets[i]["masks"][gi].to(pm.dtype).to(device)
-            if tm.shape[-2:] != pm.shape[-2:]:
-                tm = F.interpolate(tm.unsqueeze(1), size=pm.shape[-2:], mode="nearest").squeeze(1)
-            mask_logits_all.append(pm)
-            mask_tgt_all.append(tm)
-            pred_d_all.append(outputs["pred_depth"][i][pi].squeeze(-1))   # (M,)
-            tgt_d_all.append(targets[i]["depths"][gi].to(device))         # (M,)
-
-        if mask_logits_all:
-            pm = torch.cat(mask_logits_all, 0)
-            tm = torch.cat(mask_tgt_all, 0)
-            loss_mask = F.binary_cross_entropy_with_logits(pm, tm)
-            loss_dice = dice_loss(pm, tm)
-            pd = torch.cat(pred_d_all, 0)
-            td = torch.cat(tgt_d_all, 0)
-            # Only supervise finite, valid (>0) depth layers. A single invalid GT
-            # depth makes smooth_l1's BACKWARD NaN even when its forward looks fine
-            # -> this is the phase-2 NaN source. Keep the graph connected if empty.
-            valid = torch.isfinite(td) & (td > 0) & torch.isfinite(pd)
-            if valid.any():
-                loss_depth = F.smooth_l1_loss(pd[valid], td[valid], beta=self.depth_beta)
-            else:
-                loss_depth = pd.sum() * 0.0
-        else:
-            z = outputs["pred_masks"].sum() * 0.0
-            loss_mask = loss_dice = loss_depth = z
-
-        total = (self.w_class * loss_class + self.w_mask * loss_mask
-                 + self.w_dice * loss_dice + self.w_depth * loss_depth)
-        return {"loss_class": loss_class, "loss_mask": loss_mask,
-                "loss_dice": loss_dice, "loss_depth": loss_depth, "loss_total": total}
+def _attn_mask(self, query: torch.Tensor, mask_features: torch.Tensor, feat_hw) -> torch.Tensor:
+        b = mask_features.shape[0]
+        n = query.shape[0]
+        q = query.permute(1, 0, 2)                              # (B, N, C)
+        mask_logits = torch.einsum("bnc,bchw->bnhw", q, mask_features)
+        h, w = feat_hw
+        ml = F.interpolate(mask_logits, size=(h, w), mode="bilinear", align_corners=False)
+        attn = (ml.sigmoid() < self.mask_threshold).flatten(2)  # (B, N, h*w) True = block
+        # A query that blocks EVERY location -> softmax(all -inf) = NaN.
+        # Reset any fully-blocked row to "attend everywhere".
+        attn[attn.all(dim=-1)] = False
+        attn = attn.unsqueeze(1).repeat(1, self.num_heads, 1, 1).flatten(0, 1)
+        return attn.detach()
