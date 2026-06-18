@@ -1,40 +1,10 @@
 cd /home/work/intern_storage/Ayush/InstanceDepthRepo
-python - <<'PY'
-import json, os, numpy as np, cv2
-root="gid_custom"; ids=[]
-for s in ("train","test"):
-    p=os.path.join(root,f"{s}.txt")
-    if os.path.exists(p): ids+=[x.strip() for x in open(p) if x.strip()]
+ls -lh runs/phase2/ckpt_final.pth
+tail -30 runs/phase2.log   # or scroll your screen session
 
-bad_area, good_area, per_seq = [], [], {}
-for sid in ids:
-    man=json.load(open(os.path.join(root,sid,"annotations.json")))
-    b=t=0
-    for fr in man["frames"].values():
-        for inst in fr["instances"]:
-            t+=1; a=int(inst.get("area",0))
-            if float(inst.get("depth_layer_m",0.0))>0: good_area.append(a)
-            else: bad_area.append(a); b+=1
-    per_seq[sid]=(b,t)
-
-ba,ga=np.array(bad_area),np.array(good_area)
-print("=== mask size: invalid vs valid instances ===")
-print(f"  INVALID (layer=0): n={len(ba):6d}  area px  median={np.median(ba):7.0f}  p90={np.percentile(ba,90):8.0f}")
-print(f"  VALID   (layer>0): n={len(ga):6d}  area px  median={np.median(ga):7.0f}  p90={np.percentile(ga,90):8.0f}")
-
-print("\n=== per-sequence invalid rate (worst 10) ===")
-rates=sorted(((b/t if t else 0,sid,b,t) for sid,(b,t) in per_seq.items()),reverse=True)
-for r,sid,b,t in rates[:10]: print(f"  {100*r:5.1f}%  ({b:4d}/{t:4d})  {sid}")
-print(f"  sequences >90% invalid: {sum(1 for r,_,_,_ in rates if r>0.9)} / {len(rates)}")
-print(f"  sequences  <5% invalid: {sum(1 for r,_,_,_ in rates if r<0.05)} / {len(rates)}")
-
-print("\n=== raw depth validity (5 sample frames) ===")
-for sid in ids[:5]:
-    man=json.load(open(os.path.join(root,sid,"annotations.json")))
-    fr=next(iter(man["frames"].values()))
-    d=np.load(fr["depth_npy"]).astype(np.float32)
-    if d.ndim==3: d=d[...,0]
-    v=(d>0)&np.isfinite(d)
-    print(f"  {sid}: {d.shape}  valid={100*v.mean():4.1f}%  "
-          + (f"range[{d[v].min():.2f},{d[v].max():.2f}]m" if v.any() else "ALL ZERO"))
-PY
+export DINOV2_WEIGHTS=/home/work/intern_storage/Ayush/weights/dinov2_vitl14.safetensors
+export HF_HUB_OFFLINE=1
+screen -S p3
+python train.py --model-config instancedepth/configs/instance_depth.yaml \
+    --data-root gid_custom --phase 3 --image-size 504 896 --batch-size 4 \
+    --save-every 2000 --init-from runs/phase2/ckpt_final.pth --out runs/phase3
