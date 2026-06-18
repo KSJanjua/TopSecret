@@ -1,30 +1,12 @@
 cd /home/work/intern_storage/Ayush/InstanceDepthRepo
 python - <<'PY'
 import json, os, numpy as np
-root="gid_custom"; ids=[]
-for s in ("train","test"):
-    p=os.path.join(root,f"{s}.txt")
-    if os.path.exists(p): ids+=[x.strip() for x in open(p) if x.strip()]
-total=zero=neg=nan=big=0
-vals=[]
-for sid in ids:
-    man=json.load(open(os.path.join(root,sid,"annotations.json")))
-    md=float(man.get("max_depth_m",10.0))
-    for fr in man["frames"].values():
-        for inst in fr["instances"]:
-            total+=1
-            d=float(inst.get("depth_layer_m",0.0))
-            if   np.isnan(d) or np.isinf(d): nan+=1
-            elif d==0.0:                     zero+=1
-            elif d<0.0:                      neg+=1
-            else:
-                vals.append(d)
-                if d>md: big+=1
-vals=np.array(vals)
-print(f"total {total}")
-print(f"  exactly 0.0 : {zero}  ({100*zero/total:.1f}%)")
-print(f"  negative    : {neg}")
-print(f"  NaN/inf     : {nan}")
-print(f"  > max_depth : {big}")
-if len(vals): print(f"  valid depth range: min={vals.min():.3f}  median={np.median(vals):.3f}  max={vals.max():.3f} m")
+root="gid_custom"; sid=open(os.path.join(root,"train.txt")).readline().strip()
+man=json.load(open(os.path.join(root,sid,"annotations.json")))
+fr=next(iter(man["frames"].values()))
+d=np.load(fr["depth_npy"]).astype(np.float32)
+print("depth file:", fr["depth_npy"])
+print(f"shape {d.shape}  min {d.min():.3f}  max {d.max():.3f}")
+print(f"fraction of pixels == 0 : {100*np.mean(d==0):.1f}%")
+print(f"fraction finite & >0    : {100*np.mean((d>0)&np.isfinite(d)):.1f}%")
 PY
