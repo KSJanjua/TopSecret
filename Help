@@ -10,3 +10,68 @@ print(f"shape {d.shape}  min {d.min():.3f}  max {d.max():.3f}")
 print(f"fraction of pixels == 0 : {100*np.mean(d==0):.1f}%")
 print(f"fraction finite & >0    : {100*np.mean((d>0)&np.isfinite(d)):.1f}%")
 PY
+
+
+grep -rn "depth_layer_m\|\.mean()" instancedepth/data_engine/annotate.py instancedepth/data_engine/depth_io.py
+
+
+# depth: HxW float (metres), 0 = no reading;  mask: HxW bool/uint for this instance
+valid = (mask > 0) & np.isfinite(depth) & (depth > 0)
+n_valid = int(valid.sum())
+MIN_VALID_PX = 50                       # require a minimum so the mean is meaningful
+if n_valid >= MIN_VALID_PX:
+    layer = float(depth[valid].mean())  # mean over REAL readings only
+else:
+    layer = 0.0                         # genuinely unmeasurable -> stays excluded by the loss
+
+
+
+python - <<'PY'
+import json, os, glob, shutil, numpy as np, cv2
+root="gid_custom"; MIN_VALID_PX=50
+fixed=files=0
+for ann in glob.glob(os.path.join(root,"**","annotations.json"),recursive=True):
+    man=json.load(open(ann)); changed=False
+    scale=float(man.get("depth_scale_to_m",1.0))
+    for fr in man["frames"].values():
+        # load depth (metres) and the instance-id mask for this frame
+        d=np.load(fr["depth_npy"]).astype(np.float32) if fr.get("depth_npy") \
+          else cv2.imread(fr["depth_png"],cv2.IMREAD_UNCHANGED).astype(np.float32)
+        if d.ndim==3: d=d[...,0]
+        d=d*scale
+        idmap=cv2.imread(fr["object_mask"],cv2.IMREAD_UNCHANGED)
+        for inst in fr["instances"]:
+            tid=inst["track_id"]
+            m=(idmap==tid)&np.isfinite(d)&(d>0)
+            layer=float(d[m].mean()) if int(m.sum())>=MIN_VALID_PX else 0.0
+            new=round(layer,4)
+            if new!=inst.get("depth_layer_m"): inst["depth_layer_m"]=new; changed=True
+    if changed:
+        shutil.copy(ann,ann+".bak"); json.dump(man,open(ann,"w")); files+=1
+print(f"updated depth layers in {files} annotation files")
+PY
+
+
+python - <<'PY'
+import json, os, numpy as np
+root="gid_custom"; ids=[]
+for s in ("train","test"):
+    p=os.path.join(root,f"{s}.txt")
+    if os.path.exists(p): ids+=[x.strip() for x in open(p) if x.strip()]
+total=bad=0
+for sid in ids:
+    man=json.load(open(os.path.join(root,sid,"annotations.json")))
+    for fr in man["frames"].values():
+        for inst in fr["instances"]:
+            total+=1; d=float(inst.get("depth_layer_m",0.0))
+            if not (np.isfinite(d) and d>0): bad+=1
+print(f"invalid now: {bad}/{total}  ({100*bad/total:.2f}%)")
+PY
+
+export DINOV2_WEIGHTS=/home/work/intern_storage/Ayush/weights/dinov2_vitl14.safetensors
+export HF_HUB_OFFLINE=1
+python train.py --model-config instancedepth/configs/instance_depth.yaml \
+    --data-root gid_custom --phase 2 --image-size 504 896 --batch-size 4 \
+    --save-every 2000 --init-from runs/phase1/ckpt_final.pth --out runs/phase2
+
+
