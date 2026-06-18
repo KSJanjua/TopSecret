@@ -1,13 +1,8 @@
-def _attn_mask(self, query: torch.Tensor, mask_features: torch.Tensor, feat_hw) -> torch.Tensor:
-        b = mask_features.shape[0]
-        n = query.shape[0]
-        q = query.permute(1, 0, 2)                              # (B, N, C)
-        mask_logits = torch.einsum("bnc,bchw->bnhw", q, mask_features)
-        h, w = feat_hw
-        ml = F.interpolate(mask_logits, size=(h, w), mode="bilinear", align_corners=False)
-        attn = (ml.sigmoid() < self.mask_threshold).flatten(2)  # (B, N, h*w) True = block
-        # A query that blocks EVERY location -> softmax(all -inf) = NaN.
-        # Reset any fully-blocked row to "attend everywhere".
-        attn[attn.all(dim=-1)] = False
-        attn = attn.unsqueeze(1).repeat(1, self.num_heads, 1, 1).flatten(0, 1)
-        return attn.detach()
+optim.zero_grad(set_to_none=True)
+        loss.backward()
+        grad_norm = torch.nn.utils.clip_grad_norm_(params, args.clip_grad)
+        if torch.isfinite(grad_norm):
+            optim.step()
+        else:
+            log.warning("step %d: non-finite grad norm (%.3e) -- update skipped",
+                        step, float(grad_norm))
