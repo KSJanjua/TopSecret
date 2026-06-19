@@ -1,0 +1,404 @@
+#!/usr/bin/env python
+"""infer_video.py - run a trained InstanceDepth model on an arbitrary video.
+
+Reads a video of ANY resolution / aspect ratio, runs the model frame-by-frame,
+and writes a visualization video. Frames are resized to a (multiple-of-14) size
+near the training scale while preserving aspect ratio (the DINOv2 backbone's
+dynamic_img_size accepts this); the predicted depth is upsampled back to the
+original frame size for output.
+
+Outputs
+-------
+  * <output>.mp4            side-by-side  [ RGB | colorized depth ]   (default)
+  * --save-npy  --npy-dir   raw metric depth per frame as .npy (HxW, metres)
+  * --show-masks            overlay detected person instances on the RGB panel
+
+Examples
+--------
+  export DINOV2_WEIGHTS=...           # not required (checkpoint has the backbone)
+  python infer_video.py \
+      --model-config instancedepth/configs/instance_depth.yaml \
+      --checkpoint runs/phase3/ckpt_final.pth \
+      --input my_clip.mp4 --output my_clip_depth.mp4 --show-masks
+
+  # depth-only panel, raw depth dumped, every 2nd frame:
+  python infer_video.py --checkpoint runs/phase3/ckpt_final.pth \
+      --input clip.mov --no-side-by-side --save-npy --npy-dir depth_npy --stride 2
+"""
+
+from __future__ import annotations
+
+import argparse
+import os
+import time
+from pathlib import Path
+from typing import List, Optional, Tuple
+
+import cv2
+import numpy as np
+import torch
+import torch.nn.functional as F
+import yaml
+
+from instancedepth.build import build_instance_depth
+from instancedepth.utils.checkpoint import load_checkpoint
+
+# DINOv2 / ImageNet normalization (matches training preprocessing).
+IMAGENET_MEAN = (0.485, 0.456, 0.406)
+IMAGENET_STD = (0.229, 0.224, 0.225)
+PATCH = 14
+
+CV2_COLORMAPS = {
+    "inferno": cv2.COLORMAP_INFERNO,
+    "magma": cv2.COLORMAP_MAGMA,
+    "turbo": getattr(cv2, "COLORMAP_TURBO", cv2.COLORMAP_JET),
+    "viridis": cv2.COLORMAP_VIRIDIS,
+    "plasma": cv2.COLORMAP_PLASMA,
+    "jet": cv2.COLORMAP_JET,
+}
+
+# Distinct BGR colors for instance masks.
+_PALETTE = [
+    (66, 135, 245), (245, 130, 48), (60, 180, 75), (240, 50, 230),
+    (255, 225, 25), (70, 240, 240), (230, 25, 75), (170, 110, 40),
+    (145, 30, 180), (128, 240, 70), (0, 130, 200), (245, 245, 70),
+]
+
+
+# --------------------------------------------------------------------------- #
+#  helpers
+# --------------------------------------------------------------------------- #
+def round_to_patch(x: int, patch: int = PATCH) -> int:
+    """Round x to the nearest positive multiple of `patch` (>= patch)."""
+    return max(patch, int(round(x / patch)) * patch)
+
+
+def target_size(orig_h: int, orig_w: int, height: int) -> Tuple[int, int]:
+    """Aspect-preserving model input size, both sides multiples of 14.
+
+    Height is fixed to `height` (rounded to 14); width follows the aspect ratio.
+    A 16:9 video with height=504 maps to 504x896 (the training size).
+    """
+    h = round_to_patch(height)
+    w = round_to_patch(int(round(h * orig_w / orig_h)))
+    return h, w
+
+
+def preprocess(frame_bgr: np.ndarray, size_hw: Tuple[int, int],
+               device: str) -> torch.Tensor:
+    """BGR frame -> normalized (1,3,H,W) float tensor at the model input size."""
+    h, w = size_hw
+    rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+    rgb = cv2.resize(rgb, (w, h), interpolation=cv2.INTER_LINEAR)
+    t = torch.from_numpy(rgb).float().div_(255.0).permute(2, 0, 1)  # (3,H,W)
+    mean = torch.tensor(IMAGENET_MEAN).view(3, 1, 1)
+    std = torch.tensor(IMAGENET_STD).view(3, 1, 1)
+    t = (t - mean) / std
+    return t.unsqueeze(0).to(device)
+
+
+def colorize_depth(depth_m: np.ndarray, vmin: float, vmax: float,
+                   colormap: int) -> np.ndarray:
+    """Metric depth (HxW, metres) -> BGR uint8 image. Near = bright."""
+    rng = max(vmax - vmin, 1e-6)
+    norm = (vmax - depth_m) / rng        # near (small depth) -> ~1 -> bright
+    norm = np.clip(norm, 0.0, 1.0)
+    u8 = (norm * 255.0).astype(np.uint8)
+    return cv2.applyColorMap(u8, colormap)
+
+
+def vis_range(depth_m: np.ndarray, max_depth: float) -> Tuple[float, float]:
+    """Robust colormap range from depth percentiles (consistent across frames)."""
+    d = depth_m[np.isfinite(depth_m) & (depth_m > 0)]
+    if d.size == 0:
+        return 0.0, max_depth
+    lo = float(np.percentile(d, 2))
+    hi = float(np.percentile(d, 98))
+    if hi - lo < 1e-3:
+        hi = lo + 1e-3
+    return lo, hi
+
+
+def label(img: np.ndarray, text: str) -> np.ndarray:
+    """Draw a small caption in the top-left corner."""
+    cv2.rectangle(img, (0, 0), (10 + 12 * len(text), 34), (0, 0, 0), -1)
+    cv2.putText(img, text, (6, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.7,
+                (255, 255, 255), 2, cv2.LINE_AA)
+    return img
+
+
+@torch.no_grad()
+def extract_instances(out: dict, orig_hw: Tuple[int, int],
+                      score_thresh: float, mask_thresh: float,
+                      min_area: int) -> List[Tuple[np.ndarray, float]]:
+    """Return [(mask HxW bool, score)] for confident person queries."""
+    if "pred_masks" not in out or "pred_logits" not in out:
+        return []
+    logits = out["pred_logits"][0]                       # (N, C+1)
+    masks = out["pred_masks"][0]                          # (N, Hf, Wf)
+    probs = logits.softmax(-1)[:, :-1]                    # drop no-object class
+    scores, _ = probs.max(-1)                             # (N,)
+    h, w = orig_hw
+    keep = (scores > score_thresh).nonzero(as_tuple=True)[0]
+    dets: List[Tuple[np.ndarray, float]] = []
+    for i in keep.tolist():
+        m = masks[i].unsqueeze(0).unsqueeze(0).float()    # (1,1,Hf,Wf)
+        m = F.interpolate(m, size=(h, w), mode="bilinear", align_corners=False)
+        mb = (m.sigmoid()[0, 0] > mask_thresh).cpu().numpy()
+        if mb.sum() >= min_area:
+            dets.append((mb, float(scores[i])))
+    return dets
+
+
+def overlay_masks(frame_bgr: np.ndarray,
+                  dets: List[Tuple[np.ndarray, float]],
+                  alpha: float = 0.5) -> np.ndarray:
+    """Blend translucent colored masks (+ score) onto a copy of the frame."""
+    out = frame_bgr.copy()
+    for idx, (mask, score) in enumerate(dets):
+        color = _PALETTE[idx % len(_PALETTE)]
+        layer = np.zeros_like(out)
+        layer[mask] = color
+        out = cv2.addWeighted(out, 1.0, layer, alpha, 0.0)
+        ys, xs = np.where(mask)
+        if xs.size:
+            x0, y0 = int(xs.min()), int(ys.min())
+            cv2.putText(out, f"{score:.2f}", (x0, max(y0 - 5, 12)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2, cv2.LINE_AA)
+    return out
+
+
+def load_model(model_config: str, checkpoint: str, device: str):
+    """Build the model (no pretrained download) and load the trained weights."""
+    with open(model_config) as f:
+        cfg = yaml.safe_load(f)
+    cfg.setdefault("backbone", {})["pretrained"] = False  # checkpoint has the backbone
+    max_depth = float(cfg.get("max_depth", 10.0))
+    model = build_instance_depth(cfg).to(device)
+    info = load_checkpoint(checkpoint, model)
+    print(f"[load] {checkpoint}  (missing={len(info['missing'])} "
+          f"unexpected={len(info['unexpected'])})")
+    model.eval()
+    return model, max_depth
+
+
+# --------------------------------------------------------------------------- #
+#  main
+# --------------------------------------------------------------------------- #
+
+# --------------------------------------------------------------------------- #
+#  robust video sink: try OpenCV codecs, else dump PNG frames + ffmpeg-encode
+# --------------------------------------------------------------------------- #
+import shutil
+import subprocess
+
+
+class _Cv2Sink:
+    def __init__(self, writer, path):
+        self.writer, self.path = writer, path
+    def write(self, frame):
+        self.writer.write(frame)
+    def close(self):
+        self.writer.release()
+        return self.path
+
+
+class _FramesSink:
+    """Fallback: save each frame as PNG, then encode with ffmpeg on close()."""
+    def __init__(self, out_path, fps):
+        self.out_path = Path(out_path).with_suffix(".mp4")
+        self.fps = fps
+        self.dir = Path(out_path).with_suffix("")  # a folder named like the output
+        self.dir = self.dir.with_name(self.dir.name + "_frames")
+        self.dir.mkdir(parents=True, exist_ok=True)
+        self.i = 0
+        print(f"[writer] OpenCV encoders unavailable -> writing PNG frames to "
+              f"{self.dir}/ and encoding with ffmpeg")
+    def write(self, frame):
+        cv2.imwrite(str(self.dir / f"f_{self.i:06d}.png"), frame)
+        self.i += 1
+    def close(self):
+        ff = shutil.which("ffmpeg")
+        if ff is None:
+            print(f"[writer] ffmpeg not found; PNG frames left in {self.dir}/")
+            return self.dir
+        cmd = [ff, "-y", "-framerate", f"{self.fps}",
+               "-i", str(self.dir / "f_%06d.png"),
+               "-c:v", "libx264", "-pix_fmt", "yuv420p",
+               "-movflags", "+faststart", str(self.out_path)]
+        print("[writer] encoding:", " ".join(cmd))
+        r = subprocess.run(cmd, capture_output=True, text=True)
+        if r.returncode == 0 and self.out_path.exists():
+            shutil.rmtree(self.dir, ignore_errors=True)
+            return self.out_path
+        print("[writer] ffmpeg failed:\n", r.stderr[-1500:])
+        print(f"[writer] PNG frames kept in {self.dir}/ - encode them manually.")
+        return self.dir
+
+
+def open_sink(out_path, fps, w, h):
+    """Return a sink that can .write(frame) and .close()->final path.
+
+    Tries software-friendly OpenCV codecs first; if none open (e.g. only a
+    missing hardware encoder is available), falls back to PNG frames + ffmpeg.
+    """
+    for cc, ext in [("mp4v", ".mp4"), ("MJPG", ".avi"), ("XVID", ".avi")]:
+        p = Path(out_path).with_suffix(ext)
+        wr = cv2.VideoWriter(str(p), cv2.VideoWriter_fourcc(*cc), fps, (w, h))
+        if wr.isOpened():
+            print(f"[writer] codec={cc} -> {p}")
+            return _Cv2Sink(wr, p)
+        wr.release()
+    return _FramesSink(out_path, fps)
+
+
+def parse_args() -> argparse.Namespace:
+    ap = argparse.ArgumentParser(description="InstanceDepth video inference")
+    ap.add_argument("--model-config",
+                    default="instancedepth/configs/instance_depth.yaml")
+    ap.add_argument("--checkpoint", required=True,
+                    help="trained checkpoint, e.g. runs/phase3/ckpt_final.pth")
+    ap.add_argument("--input", "--video", dest="input", required=True,
+                    help="path to the input video (any resolution)")
+    ap.add_argument("--output", default=None,
+                    help="output mp4 path (default: <input>_depth.mp4)")
+    ap.add_argument("--height", type=int, default=504,
+                    help="model input height (rounded to a multiple of 14); "
+                         "width follows the video aspect ratio")
+    ap.add_argument("--device",
+                    default="cuda" if torch.cuda.is_available() else "cpu")
+    ap.add_argument("--colormap", default="inferno", choices=list(CV2_COLORMAPS))
+    ap.add_argument("--use-init-depth", action="store_true",
+                    help="use Stage-1 holistic depth instead of refined depth")
+    ap.add_argument("--show-masks", action="store_true",
+                    help="overlay detected person instances on the RGB panel")
+    ap.add_argument("--score-thresh", type=float, default=0.5)
+    ap.add_argument("--mask-thresh", type=float, default=0.5)
+    ap.add_argument("--min-area", type=int, default=200,
+                    help="ignore instance masks smaller than this many pixels")
+    ap.add_argument("--no-side-by-side", action="store_true",
+                    help="write only the colorized depth panel")
+    ap.add_argument("--save-npy", action="store_true",
+                    help="also dump raw metric depth (HxW, metres) per frame")
+    ap.add_argument("--npy-dir", default="depth_npy")
+    ap.add_argument("--stride", type=int, default=1,
+                    help="process every Nth frame")
+    ap.add_argument("--max-frames", type=int, default=0,
+                    help="stop after this many processed frames (0 = all)")
+    ap.add_argument("--fixed-range", type=float, nargs=2, default=None,
+                    metavar=("VMIN", "VMAX"),
+                    help="fixed depth colormap range in metres "
+                         "(default: per-video robust percentiles)")
+    return ap.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+
+    in_path = Path(args.input)
+    if not in_path.exists():
+        raise FileNotFoundError(f"input video not found: {in_path}")
+    out_path = Path(args.output) if args.output else \
+        in_path.with_name(in_path.stem + "_depth.mp4")
+
+    model, max_depth = load_model(args.model_config, args.checkpoint, args.device)
+    cmap = CV2_COLORMAPS[args.colormap]
+    run_instance = (not args.use_init_depth) or args.show_masks
+    run_refine = not args.use_init_depth
+    depth_key = "init_depth" if args.use_init_depth else "refined_depth"
+
+    cap = cv2.VideoCapture(str(in_path))
+    if not cap.isOpened():
+        raise RuntimeError(f"could not open video: {in_path}")
+    src_fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
+    n_total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+    orig_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    orig_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    in_hw = target_size(orig_h, orig_w, args.height)
+    out_fps = src_fps / max(args.stride, 1)
+    panels = 1 if args.no_side_by_side else 2
+    print(f"[video] {orig_w}x{orig_h} @ {src_fps:.1f}fps, {n_total} frames "
+          f"-> model input {in_hw[1]}x{in_hw[0]}  (depth source: {depth_key})")
+
+    if args.save_npy:
+        Path(args.npy_dir).mkdir(parents=True, exist_ok=True)
+
+    sink = None
+    vmin = vmax = None
+    if args.fixed_range is not None:
+        vmin, vmax = float(args.fixed_range[0]), float(args.fixed_range[1])
+
+    fi = processed = 0
+    t0 = time.time()
+    with torch.inference_mode():
+        while True:
+            ok, frame = cap.read()
+            if not ok:
+                break
+            if fi % max(args.stride, 1) != 0:
+                fi += 1
+                continue
+
+            x = preprocess(frame, in_hw, args.device)
+            out = model(x, run_instance=run_instance, run_refine=run_refine)
+
+            depth = out[depth_key]                       # (1,1,h,w) or (1,h,w)
+            if depth.dim() == 4:
+                depth = depth[0, 0]
+            elif depth.dim() == 3:
+                depth = depth[0]
+            depth = depth.float().clamp(min=0.0, max=max_depth)
+            depth = F.interpolate(depth[None, None], size=(orig_h, orig_w),
+                                  mode="bilinear", align_corners=False)[0, 0]
+            depth_np = depth.cpu().numpy()
+
+            if vmin is None:                             # set once from frame 1
+                vmin, vmax = vis_range(depth_np, max_depth)
+                print(f"[range] colormap range = [{vmin:.2f}, {vmax:.2f}] m")
+
+            depth_bgr = colorize_depth(depth_np, vmin, vmax, cmap)
+            depth_bgr = label(depth_bgr, "Depth")
+
+            if args.save_npy:
+                np.save(Path(args.npy_dir) / f"frame_{fi:06d}.npy",
+                        depth_np.astype(np.float32))
+
+            if panels == 1:
+                canvas = depth_bgr
+            else:
+                left = frame.copy()
+                if args.show_masks:
+                    dets = extract_instances(out, (orig_h, orig_w),
+                                             args.score_thresh, args.mask_thresh,
+                                             args.min_area)
+                    left = overlay_masks(left, dets)
+                    left = label(left, f"RGB  ({len(dets)} ppl)")
+                else:
+                    left = label(left, "RGB")
+                canvas = np.hstack([left, depth_bgr])
+
+            if sink is None:
+                h, w = canvas.shape[:2]
+                sink = open_sink(out_path, out_fps, w, h)
+            sink.write(canvas)
+
+            processed += 1
+            fi += 1
+            if processed % 25 == 0:
+                fps = processed / (time.time() - t0)
+                print(f"  {processed} frames  ({fps:.1f} fps)", flush=True)
+            if args.max_frames and processed >= args.max_frames:
+                break
+
+    cap.release()
+    if sink is not None:
+        out_path = sink.close()
+    dt = time.time() - t0
+    print(f"[done] {processed} frames in {dt:.1f}s "
+          f"({processed / max(dt, 1e-6):.1f} fps) -> {out_path}")
+    if args.save_npy:
+        print(f"[done] raw depth maps -> {args.npy_dir}/")
+
+
+if __name__ == "__main__":
+    main()
