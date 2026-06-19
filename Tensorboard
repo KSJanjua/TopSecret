@@ -123,6 +123,30 @@ def overlay_pred_masks(rgb: np.ndarray, out: dict, score_thresh: float,
     return out_img
 
 
+def overlay_gt_masks(rgb: np.ndarray, target: Dict[str, torch.Tensor],
+                     device) -> np.ndarray:
+    """Blend the GROUND-TRUTH person masks (from the dataset) onto the RGB."""
+    masks = target.get("masks")
+    if masks is None or masks.numel() == 0:
+        return rgb
+    h, w = rgb.shape[:2]
+    m = masks.to(device).float()                      # (G, Hm, Wm)
+    if m.shape[-2:] != (h, w):
+        m = F.interpolate(m.unsqueeze(1), size=(h, w), mode="nearest").squeeze(1)
+    mb_all = (m > 0.5).cpu().numpy()
+    palette = [(66, 135, 245), (245, 130, 48), (60, 180, 75), (240, 50, 230),
+               (255, 225, 25), (70, 240, 240), (230, 25, 75), (145, 30, 180)]
+    out_img = rgb.copy()
+    for j in range(mb_all.shape[0]):
+        mb = mb_all[j]
+        if mb.sum() < 50:
+            continue
+        layer = np.zeros_like(out_img)
+        layer[mb] = palette[j % len(palette)]
+        out_img = cv2.addWeighted(out_img, 1.0, layer, 0.45, 0.0)
+    return out_img
+
+
 # --------------------------------------------------------------------------- #
 #  metrics
 # --------------------------------------------------------------------------- #
@@ -334,11 +358,14 @@ def main() -> None:
                 if run_inst:
                     left = overlay_pred_masks(left, out, args.score_thresh,
                                               args.mask_thresh)
-                left = banner(left, "RGB" + ("+masks" if run_inst else ""))
+                left = banner(left, "RGB+pred masks" if run_inst else "RGB")
+                mid = overlay_gt_masks(rgb_img.copy(), batch["targets"][0],
+                                       args.device)
+                mid = banner(mid, "RGB+GT masks")
                 gt_c = banner(colorize(g, lo, hi, invalid=~valid), "GT depth")
                 pr_c = banner(colorize(p, lo, hi), "Pred depth")
                 er = banner(error_rgb(p, g, valid), "abs error")
-                panel = np.concatenate([left, gt_c, pr_c, er], axis=1)
+                panel = np.concatenate([left, mid, gt_c, pr_c, er], axis=1)
                 w.add_image(f"samples/frame{k}", panel, lstep,
                             dataformats="HWC")
         print(f"  logged phase {phase} step {lstep}", flush=True)
