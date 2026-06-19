@@ -1,22 +1,69 @@
-grep -n "mask\|objects\|ground\|all\|restrict\|region" evaluate.py | head -30
+Edit 1 — depth_metrics: accept an optional region mask
+Replace the function signature and the valid line (lines 40–48). Add a region parameter and AND it into valid:
+Python
+@torch.no_grad()
+def depth_metrics(pred: torch.Tensor, gt: torch.Tensor,
+                  min_d: float = 0.01, max_d: float = 10.0,
+                  region: torch.Tensor | None = None) -> dict | None:
+    """pred, gt: (1, H, W) metric depth for ONE frame.
+    region: optional (1, H, W) or (H, W) bool mask; if given, metrics are
+    computed only on pixels inside it (e.g. person masks)."""
+    valid = (gt > min_d) & (gt <= max_d)
+    if region is not None:
+        valid = valid & region.reshape(valid.shape).bool()
+    if valid.sum() == 0:
+        return None
+    p = pred[valid].clamp(min=min_d)
+    g = gt[valid]
+
+(The rest of the function — thresh, the return dict(...) — stays exactly as it is.)
+Edit 2 — add the --mask argument
+After the --use-init-depth argument (line 71), add:
+Python
+ap.add_argument("--mask", choices=("all", "objects"), default="all",
+                    help="'objects' restricts metrics to person-mask pixels")
+
+Edit 3 — build the person-mask region per frame and pass it in
+Replace the inner evaluation loop (lines 101–107) with this. It unions the matched instance masks for each frame into one person-region mask, resizes it to the depth resolution, and passes it to depth_metrics:
+Python
+
+
+for b in range(rgb.shape[0]):
+                region = None
+                if args.mask == "objects":
+                    masks = batch["targets"][b].get("masks")        # (G, Hm, Wm) GT person masks
+                    if masks is None or masks.numel() == 0:
+                        continue                                    # no people in frame -> skip
+                    region = masks.to(args.device).any(0, keepdim=True).float()  # (1, Hm, Wm)
+                    if region.shape[-2:] != gt[b].shape[-2:]:
+                        region = torch.nn.functional.interpolate(
+                            region.unsqueeze(0), size=gt[b].shape[-2:], mode="nearest").squeeze(0)
+                    region = region > 0.5
+                m = depth_metrics(pred[b], gt[b], max_d=max_depth, region=region)
+                if m is None:
+                    continue
+                for k, v in m.items():
+                    sums[k] += v
+                n += 1
+
+(One detail: this reads batch["targets"][b]["masks"], the GT instance masks your dataset already provides. If your collate stores them under a different key, tell me and I'll adjust — but masks is what the loss used in Phase 2, so it should be right.)
+Run all three checkpoints with --mask objects
+Bash
 
 export DINOV2_WEIGHTS=/home/work/intern_storage/Ayush/weights/dinov2_vitl14.safetensors
 export HF_HUB_OFFLINE=1
 
-# +H : holistic only, inside person masks
 python evaluate.py --model-config instancedepth/configs/instance_depth.yaml \
     --data-root gid_custom --checkpoint runs/phase1/ckpt_final.pth \
-    --split test --image-size 504 896 --use-init-depth --mask objects \
-    --out-json eval_phase1_obj.json
+    --split test --image-size 504 896 --use-init-depth --mask objects --out-json eval_p1_obj.json
 
-# +H+I : instance head
 python evaluate.py --model-config instancedepth/configs/instance_depth.yaml \
     --data-root gid_custom --checkpoint runs/phase2/ckpt_final.pth \
-    --split test --image-size 504 896 --mask objects --out-json eval_phase2_obj.json
+    --split test --image-size 504 896 --mask objects --out-json eval_p2_obj.json
 
-# +H+I+R : full refined model
 python evaluate.py --model-config instancedepth/configs/instance_depth.yaml \
     --data-root gid_custom --checkpoint runs/phase3/ckpt_final.pth \
-    --split test --image-size 504 896 --mask objects --out-json eval_phase3_obj.json
+    --split test --image-size 504 896 --mask objects --out-json eval_p3_obj.json
 
-for f in eval_phase1_obj eval_phase2_obj eval_phase3_obj; do echo "== $f =="; cat $f.json; echo; done
+for f in eval_p1_obj eval_p2_obj eval_p3_obj; do echo "== $f =="; cat $f.json; echo; done
+
