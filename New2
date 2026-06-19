@@ -1,0 +1,3 @@
+cd /home/work/intern_storage/Ayush/InstanceDepthRepo
+ls -lh *_depth.mp4                      # is it non-trivial size, or ~0 bytes?
+ffprobe my_clip_depth.mp4 2>&1 | head -20   # if ffprobe exists: shows codec/streams
