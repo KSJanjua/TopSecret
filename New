@@ -1,0 +1,152 @@
+cd /home/work/intern_storage/Ayush/InstanceDepthRepo
+python - <<'PY'
+import json, os, numpy as np
+root = "gid_custom"
+ids = []
+for s in ("train", "test"):
+    p = os.path.join(root, f"{s}.txt")
+    if os.path.exists(p):
+        ids += [x.strip() for x in open(p) if x.strip()]
+
+total = bad = 0
+bad_area, good_area = [], []
+for sid in ids:                                  # every sequence in both splits
+    man = json.load(open(os.path.join(root, sid, "annotations.json")))
+    for fr in man["frames"].values():            # every frame
+        for inst in fr["instances"]:             # every person instance
+            total += 1
+            d = float(inst.get("depth_layer_m", 0.0))
+            a = int(inst.get("area", 0))
+            if np.isfinite(d) and d > 0:
+                good_area.append(a)
+            else:
+                bad += 1
+                bad_area.append(a)
+
+ba, ga = np.array(bad_area), np.array(good_area)
+print(f"person-instances total            : {total}")
+print(f"with INVALID depth (excluded)     : {bad}  ({100*bad/max(total,1):.2f}%)")
+print(f"with valid depth (used)           : {total-bad}  ({100*(total-bad)/max(total,1):.2f}%)")
+print()
+print(f"INVALID instances mask size (px)  : median={np.median(ba):.0f}")
+print(f"VALID   instances mask size (px)  : median={np.median(ga):.0f}")
+print(f"-> invalid people are ~{np.median(ga)/max(np.median(ba),1):.0f}x smaller "
+      f"(i.e. small/distant, unrangeable by the sensor)")
+PY
+
+
+
+cd /home/work/intern_storage/Ayush/InstanceDepthRepo
+python - <<'PY'
+import torch, yaml
+from instancedepth.build import build_instance_depth
+from instancedepth.utils.checkpoint import load_checkpoint
+from instancedepth.losses.refine_losses import RefinementCriterion
+from instancedepth.models.instance.matcher import HungarianMatcher
+from instancedepth.data.gid_dataset import (
+    GIDInstanceDepthDataset, GIDDatasetConfig, collate_gid, build_refine_targets)
+from torch.utils.data import DataLoader
+
+cfg = yaml.safe_load(open("instancedepth/configs/instance_depth.yaml"))
+cfg.setdefault("backbone", {})["pretrained"] = False
+m = build_instance_depth(cfg).cuda()
+load_checkpoint("runs/phase3/ckpt_final.pth", m)      # your final model
+m.set_phase(3); m.eval()
+crit = RefinementCriterion().cuda(); match = HungarianMatcher()
+
+ds = GIDInstanceDepthDataset(GIDDatasetConfig(
+    annotations_root="gid_custom", split="test",
+    image_size=(504, 896), hflip_prob=0.0))
+dl = DataLoader(ds, batch_size=2, shuffle=False, num_workers=4, collate_fn=collate_gid)
+
+N_BATCHES = 300                      # sample; raise for the whole set
+batches = with_pairs = total_pairs = 0
+objs, dists = [], []
+with torch.no_grad():
+    for i, b in enumerate(dl):
+        if i >= N_BATCHES: break
+        batches += 1
+        out = m(b["image"].cuda(), run_instance=True, run_refine=True)
+        meta = out.get("refine_meta")
+        npair = int(meta["pair_query_idx"].numel()) if (meta and meta.get("pair_query_idx") is not None) else 0
+        if npair == 0:
+            continue
+        with_pairs += 1; total_pairs += npair
+        tg = [{k: (v.cuda() if torch.is_tensor(v) else v) for k, v in t.items()} for t in b["targets"]]
+        dt, valid = build_refine_targets(meta["pair_query_idx"], meta["batch_index"], match(out, tg), tg)
+        if valid.sum() == 0:
+            continue
+        lr = crit(out["d_hat"][valid], dt[valid])
+        objs.append(float(lr["loss_obj"])); dists.append(float(lr["loss_dist"]))
+
+import numpy as np
+print(f"batches checked                    : {batches}")
+print(f"batches WITH an occluding pair     : {with_pairs}  ({100*with_pairs/max(batches,1):.1f}%)")
+print(f"batches with NO pair (no refine)   : {batches-with_pairs}  ({100*(batches-with_pairs)/max(batches,1):.1f}%)")
+print(f"total occluding pairs found        : {total_pairs}")
+if objs:
+    print(f"refinement loss on pair-frames     : obj~{np.mean(objs):.4f}  dist~{np.mean(dists):.4f}")
+print()
+print("-> occlusion refinement only acts on the small % of frames with")
+print("   overlapping people; that is why whole-image depth metrics barely move.")
+PY
+
+
+cd /home/work/intern_storage/Ayush/InstanceDepthRepo
+python - <<'PY'
+import json, os, numpy as np
+root = "gid_custom"
+ids = []
+for s in ("train", "test"):
+    p = os.path.join(root, f"{s}.txt")
+    if os.path.exists(p):
+        ids += [x.strip() for x in open(p) if x.strip()]
+
+rows = []                       # one entry per frame that has >=1 zero-depth instance
+frames_total = 0
+frames_with_zero = 0
+inst_total = 0
+inst_zero = 0
+
+for sid in ids:
+    man = json.load(open(os.path.join(root, sid, "annotations.json")))
+    for fkey, fr in man["frames"].items():
+        frames_total += 1
+        n_inst = len(fr["instances"])
+        inst_total += n_inst
+        bad_tracks = []
+        for inst in fr["instances"]:
+            d = float(inst.get("depth_layer_m", 0.0))
+            if not (np.isfinite(d) and d > 0):
+                bad_tracks.append(inst.get("track_id"))
+                inst_zero += 1
+        if bad_tracks:
+            frames_with_zero += 1
+            rows.append((sid, fkey, len(bad_tracks), n_inst, bad_tracks))
+
+# ---- summary ----
+print(f"frames total                       : {frames_total}")
+print(f"frames with >=1 zero-depth instance: {frames_with_zero}  "
+      f"({100*frames_with_zero/max(frames_total,1):.1f}%)")
+print(f"instances total                    : {inst_total}")
+print(f"instances with zero depth          : {inst_zero}  "
+      f"({100*inst_zero/max(inst_total,1):.1f}%)")
+print(f"frames where ALL instances are zero : "
+      f"{sum(1 for r in rows if r[2]==r[3])}")
+print()
+
+# ---- first 40 affected frames (sequence | frame | zero/total | track ids) ----
+print("examples (sequence | frame | zero/total instances | zero track_ids):")
+for sid, fkey, nz, nt, tracks in rows[:40]:
+    print(f"  {sid} | {fkey} | {nz}/{nt} | tracks={tracks}")
+if len(rows) > 40:
+    print(f"  ... and {len(rows)-40} more affected frames")
+
+# ---- save the full list to a file so you can inspect/share it ----
+with open("zero_depth_frames.txt", "w") as f:
+    f.write("sequence\tframe\tzero_instances\ttotal_instances\tzero_track_ids\n")
+    for sid, fkey, nz, nt, tracks in rows:
+        f.write(f"{sid}\t{fkey}\t{nz}\t{nt}\t{','.join(map(str,tracks))}\n")
+print(f"\nfull list ({len(rows)} frames) written to: zero_depth_frames.txt")
+PY
+
