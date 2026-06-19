@@ -261,8 +261,12 @@ def main() -> None:
     for p, ph, gs in ckpts:
         print(f"    step {gs:6d}  (phase {ph})  {p}")
 
-    writer = SummaryWriter(args.logdir)
-    print(f"[tb] logging to {args.logdir}")
+    writers = {}
+    def writer_for(ph):
+        if ph not in writers:
+            writers[ph] = SummaryWriter(os.path.join(args.logdir, f"phase{ph}"))
+        return writers[ph]
+    print(f"[tb] logging per phase under {args.logdir}/phase1, /phase2, /phase3")
 
     for path, phase, gstep in ckpts:
         try:
@@ -301,11 +305,12 @@ def main() -> None:
                             for k, v in mo.items():
                                 agg_obj[k] = agg_obj.get(k, 0.0) + v
                             c_obj += 1
+        w = writer_for(phase)
+        lstep = gstep - PHASE_OFFSET[phase]          # step within this phase (from 0)
         for k, v in agg_all.items():
-            writer.add_scalar(f"all/{k}", v / max(c_all, 1), gstep)
+            w.add_scalar(f"all/{k}", v / max(c_all, 1), lstep)
         for k, v in agg_obj.items():
-            writer.add_scalar(f"objects/{k}", v / max(c_obj, 1), gstep)
-        writer.add_scalar("meta/phase", phase, gstep)
+            w.add_scalar(f"objects/{k}", v / max(c_obj, 1), lstep)
 
         # ---- image panels for the fixed viz frames ----
         with torch.inference_mode():
@@ -334,11 +339,12 @@ def main() -> None:
                 pr_c = banner(colorize(p, lo, hi), "Pred depth")
                 er = banner(error_rgb(p, g, valid), "abs error")
                 panel = np.concatenate([left, gt_c, pr_c, er], axis=1)
-                writer.add_image(f"samples/frame{k}", panel, gstep,
-                                 dataformats="HWC")
-        print(f"  logged step {gstep} (phase {phase})", flush=True)
+                w.add_image(f"samples/frame{k}", panel, lstep,
+                            dataformats="HWC")
+        print(f"  logged phase {phase} step {lstep}", flush=True)
 
-    writer.close()
+    for w in writers.values():
+        w.close()
     print(f"[done] open with:  tensorboard --logdir {args.logdir} --port 6006")
 
 
