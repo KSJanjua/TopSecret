@@ -1,29 +1,22 @@
-Week 1 — Paper Analysis & Data Engine
-Completed
-Analysed the ICCV 2025 paper; mapped the two-stage design and labelled each part as Paper-Specified / Inferred / Assumption.
-Re-implemented the full InstanceDepth architecture in PyTorch from the paper alone (DINOv2 + DPT backbone, depth-range decoder, instance head, occlusion-refinement module).
-Built the SAM3 annotation pipeline to convert raw RGB-D video into GID-style data: masks, tracking IDs, ground masks, depth layers.
-In Progress
-Generating and validating annotations across all 10 batches.
-Result
-Complete modular, config-driven codebase reproducing the framework.
-Custom dataset built: 306 videos, 50,323 frames, 245 train / 61 test (20% split), 1 class.
-Week 2 — Dataset Validation & Phase 1 Training
-Completed
-Validated dataset integrity; chose 504×896 input and 1 m depth bins with justification.
-Trained Phase 1 (Holistic Depth Init): 55k iters, lr 1e-5, converged (loss 8.7 → 0.7).
-Resolved data/training issues: invalid-depth handling, memory-safe loading, offline weights on the cluster.
-In Progress
-Depth-validity analysis (~19% of instances are far/small people without sensor depth — excluded from depth loss, kept for mask/class/tracking).
-Result
-Phase-1 baseline on test set: RMS 0.4236, REL 0.0749, RMSLOG 0.1142, LOG10 0.0316.
-Week 3 — Phase 2 & 3 Training, Evaluation
-Completed
-Trained Phase 2 (instance head): 25k iters, encoder frozen; hardened loss + training loop for numerical stability.
-Trained Phase 3 (occlusion refinement): 25k iters, lr 1e-6; verified occlusion path active (pairs detected, refinement losses nonzero).
-Ran stage-wise evaluation (+H, +H+I, +H+I+R) on the test set.
-In Progress
-Adding instance-level / occlusion-region metrics; preparing final report and slides.
-Result
-Full three-phase pipeline trained end-to-end with all checkpoints saved.
-Framework reproduced on custom data; dense baseline established, instance-level evaluation underway to show the occlusion-handling gain.
+grep -n "mask\|objects\|ground\|all\|restrict\|region" evaluate.py | head -30
+
+export DINOV2_WEIGHTS=/home/work/intern_storage/Ayush/weights/dinov2_vitl14.safetensors
+export HF_HUB_OFFLINE=1
+
+# +H : holistic only, inside person masks
+python evaluate.py --model-config instancedepth/configs/instance_depth.yaml \
+    --data-root gid_custom --checkpoint runs/phase1/ckpt_final.pth \
+    --split test --image-size 504 896 --use-init-depth --mask objects \
+    --out-json eval_phase1_obj.json
+
+# +H+I : instance head
+python evaluate.py --model-config instancedepth/configs/instance_depth.yaml \
+    --data-root gid_custom --checkpoint runs/phase2/ckpt_final.pth \
+    --split test --image-size 504 896 --mask objects --out-json eval_phase2_obj.json
+
+# +H+I+R : full refined model
+python evaluate.py --model-config instancedepth/configs/instance_depth.yaml \
+    --data-root gid_custom --checkpoint runs/phase3/ckpt_final.pth \
+    --split test --image-size 504 896 --mask objects --out-json eval_phase3_obj.json
+
+for f in eval_phase1_obj eval_phase2_obj eval_phase3_obj; do echo "== $f =="; cat $f.json; echo; done
