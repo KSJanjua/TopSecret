@@ -1,0 +1,346 @@
+#!/usr/bin/env python
+"""tb_progress.py - visualize training progress in TensorBoard from saved checkpoints.
+
+Your three phases are already trained, with checkpoints saved every 2000 steps.
+This script walks those checkpoints in training order, runs each on a FIXED set
+of test frames, and logs to TensorBoard:
+
+  * Scalars  - dense + person-mask metrics (RMS, REL, sigma1) vs. training step,
+               so you see the quantitative improvement curve.
+  * Images   - per fixed frame, a panel  [ RGB | GT depth | Pred depth | error ]
+               logged at each step. Drag the TensorBoard step slider to watch the
+               prediction converge to the ground truth.
+
+Checkpoints across phases are placed on one continuous step axis:
+  phase 1: 0..55k,  phase 2: 55k..80k,  phase 3: 80k..105k.
+
+Usage
+-----
+  pip install tensorboard                      # one-time
+  python tb_progress.py \
+      --model-config instancedepth/configs/instance_depth.yaml \
+      --data-root gid_custom \
+      --runs runs/phase1 runs/phase2 runs/phase3 \
+      --logdir runs/tb_progress --num-frames 4 --max-eval-frames 100 \
+      --max-ckpts-per-run 8
+
+  tensorboard --logdir runs/tb_progress --port 6006
+  # from your laptop:  ssh -L 6006:localhost:6006 work@<cluster>   then open localhost:6006
+"""
+
+from __future__ import annotations
+
+import argparse
+import glob
+import os
+import re
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple
+
+import cv2
+import numpy as np
+import torch
+import torch.nn.functional as F
+import yaml
+from torch.utils.data import DataLoader, Subset
+from torch.utils.tensorboard import SummaryWriter
+
+from instancedepth.build import build_instance_depth
+from instancedepth.data.gid_dataset import (
+    GIDDatasetConfig, GIDInstanceDepthDataset, collate_gid)
+from instancedepth.utils.checkpoint import load_checkpoint
+
+IMAGENET_MEAN = np.array([0.485, 0.456, 0.406], np.float32)
+IMAGENET_STD = np.array([0.229, 0.224, 0.225], np.float32)
+PHASE_ITERS = {1: 55000, 2: 25000, 3: 25000}
+PHASE_OFFSET = {1: 0, 2: 55000, 3: 80000}        # cumulative start step per phase
+ERR_MAX = 1.5                                     # error-map saturates at 1.5 m
+
+
+# --------------------------------------------------------------------------- #
+#  small visual helpers (return HxWx3 uint8 RGB)
+# --------------------------------------------------------------------------- #
+def denorm_image(img_t: torch.Tensor) -> np.ndarray:
+    """(3,H,W) ImageNet-normalized tensor -> (H,W,3) uint8 RGB."""
+    x = img_t.detach().cpu().numpy().transpose(1, 2, 0)
+    x = (x * IMAGENET_STD + IMAGENET_MEAN) * 255.0
+    return np.clip(x, 0, 255).astype(np.uint8)
+
+
+def colorize(depth: np.ndarray, vmin: float, vmax: float,
+             invalid: Optional[np.ndarray] = None,
+             cmap: int = cv2.COLORMAP_INFERNO) -> np.ndarray:
+    """Depth (H,W, metres) -> (H,W,3) uint8 RGB. Near = bright; invalid -> black."""
+    rng = max(vmax - vmin, 1e-6)
+    norm = np.clip((vmax - depth) / rng, 0.0, 1.0)
+    bgr = cv2.applyColorMap((norm * 255).astype(np.uint8), cmap)
+    rgb = bgr[:, :, ::-1].copy()
+    if invalid is not None:
+        rgb[invalid] = 0
+    return rgb
+
+
+def error_rgb(pred: np.ndarray, gt: np.ndarray, valid: np.ndarray) -> np.ndarray:
+    """Abs error |pred-gt| -> (H,W,3) uint8 RGB (turbo); invalid pixels black."""
+    err = np.zeros_like(gt)
+    err[valid] = np.abs(pred[valid] - gt[valid])
+    norm = np.clip(err / ERR_MAX, 0.0, 1.0)
+    cmap = getattr(cv2, "COLORMAP_TURBO", cv2.COLORMAP_JET)
+    bgr = cv2.applyColorMap((norm * 255).astype(np.uint8), cmap)
+    rgb = bgr[:, :, ::-1].copy()
+    rgb[~valid] = 0
+    return rgb
+
+
+def banner(img: np.ndarray, text: str) -> np.ndarray:
+    cv2.rectangle(img, (0, 0), (8 + 11 * len(text), 26), (0, 0, 0), -1)
+    cv2.putText(img, text, (5, 19), cv2.FONT_HERSHEY_SIMPLEX, 0.55,
+                (255, 255, 255), 1, cv2.LINE_AA)
+    return img
+
+
+def overlay_pred_masks(rgb: np.ndarray, out: dict, score_thresh: float,
+                       mask_thresh: float) -> np.ndarray:
+    """Blend predicted person masks onto the RGB panel (phase >= 2)."""
+    if "pred_masks" not in out or "pred_logits" not in out:
+        return rgb
+    h, w = rgb.shape[:2]
+    logits, masks = out["pred_logits"][0], out["pred_masks"][0]
+    scores = logits.softmax(-1)[:, :-1].max(-1).values
+    keep = (scores > score_thresh).nonzero(as_tuple=True)[0]
+    palette = [(66, 135, 245), (245, 130, 48), (60, 180, 75), (240, 50, 230),
+               (255, 225, 25), (70, 240, 240), (230, 25, 75), (145, 30, 180)]
+    out_img = rgb.copy()
+    for j, i in enumerate(keep.tolist()):
+        m = F.interpolate(masks[i][None, None].float(), size=(h, w),
+                          mode="bilinear", align_corners=False)
+        mb = (m.sigmoid()[0, 0] > mask_thresh).cpu().numpy()
+        if mb.sum() < 100:
+            continue
+        layer = np.zeros_like(out_img)
+        layer[mb] = palette[j % len(palette)]
+        out_img = cv2.addWeighted(out_img, 1.0, layer, 0.45, 0.0)
+    return out_img
+
+
+# --------------------------------------------------------------------------- #
+#  metrics
+# --------------------------------------------------------------------------- #
+@torch.no_grad()
+def depth_metrics(pred: torch.Tensor, gt: torch.Tensor, max_d: float,
+                  region: Optional[torch.Tensor] = None,
+                  min_d: float = 0.01) -> Optional[dict]:
+    valid = (gt > min_d) & (gt <= max_d)
+    if region is not None:
+        valid = valid & region.bool()
+    if valid.sum() == 0:
+        return None
+    p = pred[valid].clamp(min=min_d)
+    g = gt[valid]
+    thr = torch.maximum(p / g, g / p)
+    return dict(RMS=float(torch.sqrt(((p - g) ** 2).mean())),
+                REL=float(((p - g).abs() / g).mean()),
+                sigma1=float((thr < 1.25).float().mean()))
+
+
+def person_region(target: Dict[str, torch.Tensor], hw, device) -> Optional[torch.Tensor]:
+    masks = target.get("masks")
+    if masks is None or masks.numel() == 0:
+        return None
+    reg = masks.to(device).any(0, keepdim=True).float()       # (1,Hm,Wm)
+    if reg.shape[-2:] != hw:
+        reg = F.interpolate(reg.unsqueeze(0), size=hw, mode="nearest").squeeze(0)
+    return reg > 0.5
+
+
+# --------------------------------------------------------------------------- #
+#  checkpoint discovery
+# --------------------------------------------------------------------------- #
+def _phase_of(path: str) -> int:
+    m = re.search(r"phase\s*([123])", path)
+    return int(m.group(1)) if m else 1
+
+
+def _step_of(path: str, phase: int) -> int:
+    name = os.path.basename(path)
+    if "final" in name:
+        return PHASE_ITERS[phase]                 # final sorts last in its phase
+    m = re.search(r"(\d+)", name)
+    return int(m.group(1)) if m else 0
+
+
+def _even_sample(items: list, k: int) -> list:
+    if k <= 0 or len(items) <= k:
+        return items
+    idx = np.linspace(0, len(items) - 1, k).round().astype(int)
+    return [items[i] for i in sorted(set(idx.tolist()))]
+
+
+def gather_checkpoints(runs: List[str], max_per_run: int
+                       ) -> List[Tuple[str, int, int]]:
+    """Return [(ckpt_path, phase, global_step)] in training order."""
+    out: List[Tuple[str, int, int]] = []
+    for entry in runs:
+        if os.path.isdir(entry):
+            files = sorted(glob.glob(os.path.join(entry, "ckpt_*.pth")))
+        else:
+            files = sorted(glob.glob(entry))      # a glob or single file
+        if not files:
+            print(f"[warn] no checkpoints under {entry}")
+            continue
+        ph = _phase_of(entry if os.path.isdir(entry) else files[0])
+        files = sorted(files, key=lambda p: _step_of(p, ph))
+        files = _even_sample(files, max_per_run)
+        for f in files:
+            p = _phase_of(f) if re.search(r"phase\s*[123]", f) else ph
+            out.append((f, p, PHASE_OFFSET[p] + _step_of(f, p)))
+    out.sort(key=lambda t: t[2])
+    return out
+
+
+# --------------------------------------------------------------------------- #
+#  main
+# --------------------------------------------------------------------------- #
+def parse_args() -> argparse.Namespace:
+    ap = argparse.ArgumentParser(description="TensorBoard progress from checkpoints")
+    ap.add_argument("--model-config",
+                    default="instancedepth/configs/instance_depth.yaml")
+    ap.add_argument("--data-root", default="gid_custom")
+    ap.add_argument("--runs", nargs="+",
+                    default=["runs/phase1", "runs/phase2", "runs/phase3"],
+                    help="checkpoint dirs (or globs/files) in phase order")
+    ap.add_argument("--logdir", default="runs/tb_progress")
+    ap.add_argument("--split", default="test")
+    ap.add_argument("--image-size", type=int, nargs=2, default=(504, 896))
+    ap.add_argument("--num-frames", type=int, default=4,
+                    help="how many fixed frames to visualize as image panels")
+    ap.add_argument("--max-eval-frames", type=int, default=100,
+                    help="frames used to average the scalar metrics per checkpoint")
+    ap.add_argument("--max-ckpts-per-run", type=int, default=8,
+                    help="evenly sample at most this many checkpoints per phase")
+    ap.add_argument("--batch-size", type=int, default=2)
+    ap.add_argument("--num-workers", type=int, default=4)
+    ap.add_argument("--score-thresh", type=float, default=0.5)
+    ap.add_argument("--mask-thresh", type=float, default=0.5)
+    ap.add_argument("--device",
+                    default="cuda" if torch.cuda.is_available() else "cpu")
+    return ap.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+    with open(args.model_config) as f:
+        cfg = yaml.safe_load(f)
+    cfg.setdefault("backbone", {})["pretrained"] = False   # checkpoints carry the backbone
+    max_depth = float(cfg.get("max_depth", 10.0))
+
+    model = build_instance_depth(cfg).to(args.device)
+    model.eval()
+
+    ds = GIDInstanceDepthDataset(GIDDatasetConfig(
+        annotations_root=args.data_root, split=args.split,
+        image_size=tuple(args.image_size), max_depth=max_depth, hflip_prob=0.0))
+    n = len(ds)
+    metric_idx = list(range(min(args.max_eval_frames, n)))
+    viz_idx = np.linspace(0, n - 1, args.num_frames).round().astype(int).tolist()
+    print(f"[data] {n} {args.split} frames | metrics on {len(metric_idx)} | "
+          f"visualizing frames {viz_idx}")
+
+    metric_loader = DataLoader(Subset(ds, metric_idx), batch_size=args.batch_size,
+                               shuffle=False, num_workers=args.num_workers,
+                               collate_fn=collate_gid)
+    viz_loader = DataLoader(Subset(ds, viz_idx), batch_size=1, shuffle=False,
+                            num_workers=0, collate_fn=collate_gid)
+    # cache viz batches (small, fixed)
+    viz_batches = [b for b in viz_loader]
+
+    ckpts = gather_checkpoints(args.runs, args.max_ckpts_per_run)
+    if not ckpts:
+        raise SystemExit("no checkpoints found - check --runs paths")
+    print(f"[ckpts] {len(ckpts)} checkpoints over the training timeline:")
+    for p, ph, gs in ckpts:
+        print(f"    step {gs:6d}  (phase {ph})  {p}")
+
+    writer = SummaryWriter(args.logdir)
+    print(f"[tb] logging to {args.logdir}")
+
+    for path, phase, gstep in ckpts:
+        try:
+            load_checkpoint(path, model)
+        except Exception as e:
+            print(f"[warn] could not load {path}: {e}")
+            continue
+        model.eval()
+        run_inst = phase >= 2
+        run_ref = phase >= 3
+
+        # ---- scalar metrics over the fixed subset ----
+        agg_all: Dict[str, float] = {}
+        agg_obj: Dict[str, float] = {}
+        c_all = c_obj = 0
+        with torch.inference_mode():
+            for batch in metric_loader:
+                rgb = batch["image"].to(args.device)
+                gt = batch["depth"].to(args.device)
+                out = model(rgb, run_instance=run_inst, run_refine=run_ref)
+                pred = out.get("refined_depth") if run_ref else out["init_depth"]
+                if pred is None:
+                    pred = out["init_depth"]
+                for b in range(rgb.shape[0]):
+                    pb = pred[b] if pred[b].dim() == 3 else pred[b].unsqueeze(0)
+                    gb = gt[b]
+                    md = depth_metrics(pb, gb, max_depth)
+                    if md:
+                        for k, v in md.items():
+                            agg_all[k] = agg_all.get(k, 0.0) + v
+                        c_all += 1
+                    reg = person_region(batch["targets"][b], gb.shape[-2:], args.device)
+                    if reg is not None:
+                        mo = depth_metrics(pb, gb, max_depth, region=reg)
+                        if mo:
+                            for k, v in mo.items():
+                                agg_obj[k] = agg_obj.get(k, 0.0) + v
+                            c_obj += 1
+        for k, v in agg_all.items():
+            writer.add_scalar(f"all/{k}", v / max(c_all, 1), gstep)
+        for k, v in agg_obj.items():
+            writer.add_scalar(f"objects/{k}", v / max(c_obj, 1), gstep)
+        writer.add_scalar("meta/phase", phase, gstep)
+
+        # ---- image panels for the fixed viz frames ----
+        with torch.inference_mode():
+            for k, batch in enumerate(viz_batches):
+                rgb = batch["image"].to(args.device)
+                gt = batch["depth"].to(args.device)
+                out = model(rgb, run_instance=run_inst, run_refine=run_ref)
+                pred = out.get("refined_depth") if run_ref else out["init_depth"]
+                if pred is None:
+                    pred = out["init_depth"]
+                rgb_img = denorm_image(rgb[0])
+                g = gt[0, 0].cpu().numpy()
+                p = (pred[0, 0] if pred[0].dim() == 3 else pred[0]).clamp(
+                    0, max_depth).cpu().numpy()
+                valid = np.isfinite(g) & (g > 0)
+                lo = float(np.percentile(g[valid], 2)) if valid.any() else 0.0
+                hi = float(np.percentile(g[valid], 98)) if valid.any() else max_depth
+                if hi - lo < 1e-3:
+                    hi = lo + 1e-3
+                left = rgb_img.copy()
+                if run_inst:
+                    left = overlay_pred_masks(left, out, args.score_thresh,
+                                              args.mask_thresh)
+                left = banner(left, "RGB" + ("+masks" if run_inst else ""))
+                gt_c = banner(colorize(g, lo, hi, invalid=~valid), "GT depth")
+                pr_c = banner(colorize(p, lo, hi), "Pred depth")
+                er = banner(error_rgb(p, g, valid), "abs error")
+                panel = np.concatenate([left, gt_c, pr_c, er], axis=1)
+                writer.add_image(f"samples/frame{k}", panel, gstep,
+                                 dataformats="HWC")
+        print(f"  logged step {gstep} (phase {phase})", flush=True)
+
+    writer.close()
+    print(f"[done] open with:  tensorboard --logdir {args.logdir} --port 6006")
+
+
+if __name__ == "__main__":
+    main()
