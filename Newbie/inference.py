@@ -1,17 +1,21 @@
-"""Resolve the instance head's per-query predictions into clean, NON-OVERLAPPING
-instance masks (Mask2Former-style inference).
+"""Resolve the instance head's per-query predictions into clean instance masks.
 
-The head emits N independent per-query binary masks. Two queries can fire on the
-same object (duplicate masks), and masks may overlap (one person's mask covering
-part of a neighbor). This resolves both:
+The head emits N independent per-query masks. Two failure modes when consumed
+naively: duplicate masks on one object, and masks overlapping a neighbour. This
+resolves them while PRIORITIZING RECALL (never silently delete a real person):
 
-  * each pixel is assigned to the single highest-scoring query
-    (score = class confidence x mask probability), so masks cannot overlap;
-  * a query that ends up mostly subsumed by a stronger one is dropped, so
-    duplicates disappear.
+  1. score filter: drop low-confidence queries (score_thresh).
+  2. IoU NMS: drop a query only if it overlaps a higher-scoring query a LOT
+     (mask IoU > nms_iou). A true duplicate has near-identical mask -> high IoU
+     and is removed; two side-by-side people touch only at the border -> low IoU
+     and are BOTH kept. This is the key difference from an area-retention rule,
+     which wrongly deletes an adjacent person whose mask is partly overlapped.
+  3. by default, each surviving instance keeps its OWN full mask (no erosion, so
+     nobody is reduced to "a few body parts"). Set resolve_overlaps=True for
+     strictly non-overlapping masks (per-pixel argmax by MASK probability -- not
+     class score, so a confident neighbour cannot steal pixels).
 
-Use this wherever final instance masks are consumed (visualization, video
-inference). It does NOT change training; it is pure post-processing.
+Pure post-processing; does NOT change training. Use for visualization / video.
 """
 
 from __future__ import annotations
@@ -25,12 +29,13 @@ import torch
 def instance_segmentation(
     pred_logits: torch.Tensor,        # (N, K+1) class logits, last class = no-object
     pred_masks: torch.Tensor,         # (N, H, W) mask logits
-    score_thresh: float = 0.5,
+    score_thresh: float = 0.4,
     mask_thresh: float = 0.5,
     min_area: int = 100,
-    overlap_thresh: float = 0.8,
+    nms_iou: float = 0.5,
+    resolve_overlaps: bool = False,
 ) -> List[Dict[str, object]]:
-    """Return non-overlapping, de-duplicated instances for ONE image.
+    """Return de-duplicated instances for ONE image.
 
     Each result: {"mask": (H, W) bool, "score": float, "label": int},
     sorted by score (descending).
@@ -43,22 +48,40 @@ def instance_segmentation(
     cls_score = cls_score[keep]
     cls_id = cls_id[keep]
     mask_prob = pred_masks[keep].sigmoid()                # (M, H, W)
+    bin_mask = mask_prob > mask_thresh                    # (M, H, W)
 
-    # per-pixel winner = query with the highest (class score * mask probability)
-    weighted = mask_prob * cls_score[:, None, None]       # (M, H, W)
-    winner = weighted.argmax(0)                           # (H, W)
+    # ---- IoU NMS: keep highest-scoring, drop only near-identical duplicates ----
+    order = torch.argsort(cls_score, descending=True).tolist()
+    kept: List[int] = []
+    for i in order:
+        if int(bin_mask[i].sum()) < min_area:
+            continue
+        duplicate = False
+        for j in kept:
+            inter = (bin_mask[i] & bin_mask[j]).sum().float()
+            union = (bin_mask[i] | bin_mask[j]).sum().float().clamp(min=1)
+            if (inter / union) > nms_iou:                 # high overlap -> same object
+                duplicate = True
+                break
+        if not duplicate:
+            kept.append(i)
+    if not kept:
+        return []
+
+    # ---- final masks ----
+    if resolve_overlaps:
+        # each pixel to the survivor with the highest MASK probability there
+        surv_prob = mask_prob[kept]                       # (S, H, W)
+        winner = surv_prob.argmax(0)                      # (H, W)
+        final = [(winner == s) & bin_mask[kept[s]] for s in range(len(kept))]
+    else:
+        final = [bin_mask[i] for i in kept]               # full own masks (recall-first)
 
     results: List[Dict[str, object]] = []
-    for k in range(mask_prob.shape[0]):
-        own = mask_prob[k] > mask_thresh                  # this query's own confident region
-        kept = (winner == k) & own                        # the part it actually wins
-        area = int(kept.sum())
-        orig = int(own.sum())
-        if orig == 0 or area < min_area:
+    for s, i in enumerate(kept):
+        m = final[s]
+        if int(m.sum()) < min_area:
             continue
-        if area / orig < overlap_thresh:                  # mostly taken by a stronger query -> duplicate
-            continue
-        results.append({"mask": kept, "score": float(cls_score[k]), "label": int(cls_id[k])})
-
+        results.append({"mask": m, "score": float(cls_score[i]), "label": int(cls_id[i])})
     results.sort(key=lambda r: r["score"], reverse=True)
     return results
