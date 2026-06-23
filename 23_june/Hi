@@ -1,1 +1,2 @@
-
+python train.py --model-config instancedepth/configs/instance_depth.yaml --data-root gid_custom \
+    --phase 2 --init-from runs/phase1/ckpt_final.pth --out runs/phase2_v3
