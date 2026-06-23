@@ -1,0 +1,30 @@
+from instancedepth.models.instance.inference import instance_segmentation
+
+def overlay_pred_masks(rgb: np.ndarray, out: dict, score_thresh: float,
+                       mask_thresh: float) -> np.ndarray:
+    """Blend predicted person masks onto the RGB panel (phase >= 2).
+
+    Resolves the per-query masks into NON-OVERLAPPING, de-duplicated instances
+    (one colour per person) instead of painting every confident query.
+    """
+    if "pred_masks" not in out or "pred_logits" not in out:
+        return rgb
+    h, w = rgb.shape[:2]
+    logits = out["pred_logits"][0]
+    masks = F.interpolate(out["pred_masks"][0][None].float(), size=(h, w),
+                          mode="bilinear", align_corners=False)[0]
+    insts = instance_segmentation(logits, masks, score_thresh=score_thresh,
+                                  mask_thresh=mask_thresh, min_area=100, overlap_thresh=0.8)
+    palette = [(66, 135, 245), (245, 130, 48), (60, 180, 75), (240, 50, 230),
+               (255, 225, 25), (70, 240, 240), (230, 25, 75), (145, 30, 180)]
+    out_img = rgb.copy()
+    for j, inst in enumerate(insts):
+        mb = inst["mask"].cpu().numpy()
+        layer = np.zeros_like(out_img)
+        layer[mb] = palette[j % len(palette)]
+        out_img = cv2.addWeighted(out_img, 1.0, layer, 0.45, 0.0)
+    return out_img
+
+python tb_progress.py --runs runs/phase2_v2 --split test --num-frames 8 --max-ckpts-per-run 4 \
+    --logdir runs/tb_progress_p2b
+tensorboard --logdir runs/tb_progress_p2b
