@@ -5,3 +5,6 @@ insts = instance_segmentation(logits, masks, score_thresh=score_thresh,
 python tb_progress.py --runs runs/phase2_v2 --split test --num-frames 8 --max-ckpts-per-run 4 \
     --score-thresh 0.4 --logdir runs/tb_progress_p2c
 tensorboard --logdir runs/tb_progress_p2c
+
+python check_gt_tracking.py --data-root gid_custom --split train \
+    --max-seqs 8 --strip-frames 6 --min-instances 2 --out-dir gt_track_diag
