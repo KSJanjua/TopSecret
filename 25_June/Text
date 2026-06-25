@@ -113,3 +113,8 @@ python viz_phase2_predictions.py --model-config instancedepth/configs/instance_d
   --data-root gid_custom --checkpoint runs/phase2_v4/ckpt_final.pth \
   --split test --num-frames 12 --out-dir viz_test
 
+Hi [Mentor], quick Phase-2 update:
+I added the instance-segmentation metrics that Mask2Former uses (mask AP, recall at different IoU thresholds, and IoU) into our pipeline so we could actually measure mask quality instead of judging by eye. The results on the trained checkpoint came out strong — on the test set: AP 0.75, AP50 0.90, recall@0.5 ≈ 90%, recall@0.75 ≈ 83%, count error ≈ 0.20. On train it was even higher (AP 0.80, recall ≈ 95%), so the model is genuinely learning well.
+For more clarity I also visualised predictions against the ground truth. With the default NMS setting I saw some duplicate masks — the same person getting more than one mask, especially in crowded frames. After lowering nms_iou to 0.3, the duplicates were cleaned up well (e.g. a 3-person frame went from 5 masks down to a correct 3), and almost all frames now look clean. The only remaining issue is in heavily occluded frames where 3+ people stack together — there one mask sometimes gets shared across two people and misses some body parts. This is rare (mostly just the most crowded frame) and consistent with the metrics.
+This kind of merge can't be fixed by post-processing, so I'm going to retrain Phase 2 today with a higher learning rate (1e-4 instead of 1e-5), since our overfitting test showed much cleaner instance separation at that LR. The training takes time, so we'll review the results together tomorrow.
+Thanks!
