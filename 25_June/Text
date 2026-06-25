@@ -79,3 +79,31 @@ python train.py \
 
 B. Frozen (same command, drop --unfreeze-backbone, change --out): tests whether the frozen Phase-1 features are the bottleneck. Run this only after A passes.
 Watch the console mask_mIoU_matched=... line (or tensorboard --logdir runs).
+
+
+
+22222222
+H2 — rerun the same 4-frame overfit, but with the depth term ON. Add one arg and reuse the test:
+In parse_args:
+Python
+ap.add_argument("--ov-wdepth", type=float, default=0.0,
+                    help="depth-layer loss weight during overfit; set 1.0 to mirror real training")
+
+
+Change edit 5's two lines to use it:
+Python
+matcher = HungarianMatcher(w_depth=args.ov_wdepth if args.overfit else 1.0)
+    inst_crit = InstanceSetCriterion(
+        num_classes=mc.get("instance", {}).get("num_classes", 1),
+        w_depth=args.ov_wdepth if args.overfit else 1.0).to(args.device)
+
+
+Run:
+Bash
+python train.py --model-config instancedepth/configs/instance_depth.yaml \
+  --data-root gid_custom --phase 2 --overfit 4 --unfreeze-backbone --ov-wdepth 1.0 \
+  --lr 1e-4 --batch-size 2 --num-workers 2 --iters 600 --log-every 10 \
+  --save-every 100000 --out runs/overfit_wdepth
+
+
+Read it like this:
