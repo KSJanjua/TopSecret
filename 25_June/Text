@@ -1,4 +1,4 @@
-Patch to train.py (6 small edits)
+9Patch to train.py (6 small edits)
 1. Import — after line 195 (from instancedepth.utils.checkpoint import ...):
 Python
 from instancedepth.utils.instance_metrics import mean_matched_iou
@@ -107,3 +107,9 @@ python train.py --model-config instancedepth/configs/instance_depth.yaml \
 
 
 Read it like this:
+
+
+python viz_phase2_predictions.py --model-config instancedepth/configs/instance_depth.yaml \
+  --data-root gid_custom --checkpoint runs/phase2_v4/ckpt_final.pth \
+  --split test --num-frames 12 --out-dir viz_test
+
