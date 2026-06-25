@@ -35,6 +35,7 @@ import yaml
 from instancedepth.build import build_instance_depth_from_yaml
 from instancedepth.data.gid_dataset import (GIDDatasetConfig,
                                             GIDInstanceDepthDataset)
+from instancedepth.models.instance.inference import instance_segmentation
 from instancedepth.utils.checkpoint import load_checkpoint
 
 IMAGENET_MEAN = np.array([0.485, 0.456, 0.406], np.float32)
@@ -91,6 +92,9 @@ def main() -> None:
     ap.add_argument("--image-size", type=int, nargs=2, default=(504, 896))
     ap.add_argument("--num-frames", type=int, default=8)
     ap.add_argument("--score-thresh", type=float, default=0.5)
+    ap.add_argument("--use-nms", action="store_true",
+                    help="route through inference.instance_segmentation (duplicate + "
+                         "fragment NMS) -- i.e. show the DEPLOYED output, not raw queries.")
     ap.add_argument("--out-dir", default="viz")
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     args = ap.parse_args()
@@ -124,17 +128,24 @@ def main() -> None:
             logits = out["pred_logits"][0]                     # (N,K+1)
             masks = F.interpolate(out["pred_masks"][0].unsqueeze(0), size=(H, W),
                                   mode="bilinear", align_corners=False)[0]
-            fg = logits.softmax(-1)[:, :-1].max(-1).values
-            keep = fg >= args.score_thresh
-            pred = (masks[keep].sigmoid() > 0.5).cpu().numpy() if keep.any() \
-                else np.zeros((0, H, W), bool)
+            if args.use_nms:                                   # deployed path (de-duplicated)
+                insts = instance_segmentation(logits, masks, score_thresh=args.score_thresh)
+                pred = (np.stack([i["mask"].cpu().numpy() for i in insts])
+                        if insts else np.zeros((0, H, W), bool))
+            else:                                              # raw per-query masks
+                fg = logits.softmax(-1)[:, :-1].max(-1).values
+                keep = fg >= args.score_thresh
+                pred = (masks[keep].sigmoid() > 0.5).cpu().numpy() if keep.any() \
+                    else np.zeros((0, H, W), bool)
             gt_b = (gt > 0.5).cpu().numpy() if gt.numel() else np.zeros((0, H, W), bool)
 
             base = _denorm(rgb[0])
             panel = np.hstack([
                 _label(base, f"RGB  idx={idx}"),
                 _label(_overlay(base, gt_b), f"GT  ({gt_b.shape[0]} inst)"),
-                _label(_overlay(base, pred), f"PRED ({pred.shape[0]} @>{args.score_thresh})"),
+                _label(_overlay(base, pred),
+                       f"PRED {'NMS' if args.use_nms else 'raw'} "
+                       f"({pred.shape[0]} @>{args.score_thresh})"),
             ])
             path = os.path.join(args.out_dir, f"{args.split}_{idx:06d}.png")
             cv2.imwrite(path, panel)
