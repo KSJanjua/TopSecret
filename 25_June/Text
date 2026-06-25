@@ -1,1 +1,81 @@
+Patch to train.py (6 small edits)
+1. Import — after line 195 (from instancedepth.utils.checkpoint import ...):
+Python
+from instancedepth.utils.instance_metrics import mean_matched_iou
 
+2. Args — before return ap.parse_args() (line 228):
+Python
+ap.add_argument("--overfit", type=int, default=0,
+                    help="DEBUG: train on first N non-empty frames, no flip, mask+class only.")
+    ap.add_argument("--unfreeze-backbone", action="store_true",
+                    help="DEBUG: also train the backbone (removes frozen-feature confound).")
+
+3. Unfreeze — between model.set_phase(args.phase) (247) and model.train() (248):
+Python
+if args.unfreeze_backbone:
+        for p in model.backbone.parameters():
+            p.requires_grad_(True)
+        log.info("[debug] backbone UNFROZEN")
+
+4. Dataset — replace lines 256–261:
+Python
+ds = GIDInstanceDepthDataset(GIDDatasetConfig(
+        annotations_root=args.data_root, split="train",
+        image_size=tuple(args.image_size), max_depth=max_depth,
+        hflip_prob=0.0 if args.overfit else 0.5))   # no flip when overfitting
+    if args.overfit:                                 # first N frames with >=1 annotated instance
+        keep = [i for i, (man, fk) in enumerate(ds.index)
+                if len(man["frames"][fk]["instances"]) >= 1][:args.overfit]
+        ds = torch.utils.data.Subset(ds, keep)
+        log.info("[overfit] %d frames, indices=%s", len(keep), keep)
+    loader = DataLoader(ds, batch_size=args.batch_size, shuffle=True,
+                        num_workers=args.num_workers, collate_fn=collate_gid,
+                        drop_last=not bool(args.overfit),
+                        pin_memory=args.device.startswith("cuda"))
+
+
+5. Drop depth term — lines 267–269:
+Python
+matcher = HungarianMatcher(w_depth=0.0 if args.overfit else 1.0)
+    inst_crit = InstanceSetCriterion(
+        num_classes=mc.get("instance", {}).get("num_classes", 1),
+        w_depth=0.0 if args.overfit else 1.0).to(args.device)
+
+
+6. Live mask IoU — after the for k, v in logs.items(): writer.add_scalar(...) loop (line 352):
+Python
+if args.phase == 2:
+                with torch.no_grad():
+                    pm, pl = out["pred_masks"], out["pred_logits"]
+                    ph, pw = pm.shape[-2:]
+                    ious = []
+                    for bi in range(rgb.shape[0]):
+                        gm = targets[bi]["masks"]
+                        if gm.numel() == 0:
+                            continue
+                        fg = pl[bi].softmax(-1)[:, :-1].max(-1).values > 0.5
+                        if fg.sum() == 0:
+                            ious.append(0.0); continue
+                        pred_b = pm[bi][fg].sigmoid() > 0.5
+                        gm_r = torch.nn.functional.interpolate(
+                            gm.unsqueeze(1).float(), size=(ph, pw), mode="nearest").squeeze(1) > 0.5
+                        ious.append(mean_matched_iou(pred_b.cpu().numpy(), gm_r.cpu().numpy()))
+                    if ious:
+                        miou = sum(ious) / len(ious)
+                        writer.add_scalar("train/mask_mIoU_matched", miou, step)
+                        log.info("        mask_mIoU_matched=%.3f", miou)
+
+
+Run it — two variants
+A. Unfrozen (the clean "is my code correct?" test):
+Bash
+python train.py \
+  --model-config instancedepth/configs/instance_depth.yaml \
+  --data-root gid_custom --phase 2 \
+  --overfit 4 --unfreeze-backbone \
+  --lr 1e-4 --batch-size 2 --num-workers 2 \
+  --iters 600 --log-every 10 --save-every 100000 \
+  --out runs/overfit_unfrozen
+
+B. Frozen (same command, drop --unfreeze-backbone, change --out): tests whether the frozen Phase-1 features are the bottleneck. Run this only after A passes.
+Watch the console mask_mIoU_matched=... line (or tensorboard --logdir runs).
