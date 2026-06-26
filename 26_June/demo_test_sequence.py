@@ -61,6 +61,60 @@ def color_for(idx: int) -> Tuple[int, int, int]:
 
 
 # --------------------------------------------------------------------------- #
+#  lightweight greedy IoU tracker -> persistent ID (and thus color) per person
+# --------------------------------------------------------------------------- #
+def _iou(a: np.ndarray, b: np.ndarray) -> float:
+    inter = np.logical_and(a, b).sum()
+    union = np.logical_or(a, b).sum()
+    return float(inter / union) if union else 0.0
+
+
+class Tracker:
+    """Greedy frame-to-frame mask association. Each person keeps one ID (->color)
+    for as long as it's matched; a track survives `max_age` unmatched frames so it
+    re-acquires the SAME id after a brief occlusion."""
+
+    def __init__(self, iou_thresh: float = 0.3, max_age: int = 10) -> None:
+        self.iou_thresh = iou_thresh
+        self.max_age = max_age
+        self.tracks: List[dict] = []          # {id, mask, age}
+        self.next_id = 0
+
+    def update(self, masks: List[np.ndarray]) -> List[int]:
+        assigned: List[Optional[int]] = [None] * len(masks)
+        pairs = []
+        for mi, m in enumerate(masks):
+            for ti, t in enumerate(self.tracks):
+                iou = _iou(m, t["mask"])
+                if iou >= self.iou_thresh:
+                    pairs.append((iou, mi, ti))
+        pairs.sort(key=lambda p: p[0], reverse=True)        # highest IoU first
+        used_m, used_t = set(), set()
+        for _iouv, mi, ti in pairs:
+            if mi in used_m or ti in used_t:
+                continue
+            used_m.add(mi); used_t.add(ti)
+            assigned[mi] = self.tracks[ti]["id"]
+            self.tracks[ti]["mask"] = masks[mi]
+            self.tracks[ti]["age"] = 0
+        # age + drop stale tracks (only pre-existing ones)
+        survivors = []
+        for ti, t in enumerate(self.tracks):
+            if ti not in used_t:
+                t["age"] += 1
+            if t["age"] <= self.max_age:
+                survivors.append(t)
+        self.tracks = survivors
+        # spawn new tracks for unmatched detections
+        for mi, m in enumerate(masks):
+            if assigned[mi] is None:
+                assigned[mi] = self.next_id
+                self.tracks.append({"id": self.next_id, "mask": m, "age": 0})
+                self.next_id += 1
+        return [int(a) for a in assigned]
+
+
+# --------------------------------------------------------------------------- #
 def denorm(img_t: torch.Tensor) -> np.ndarray:
     """(3,H,W) normalized tensor -> (H,W,3) BGR uint8."""
     x = img_t.detach().cpu().numpy().transpose(1, 2, 0)
@@ -76,10 +130,13 @@ def banner(img, text):
     return img
 
 
-def overlay(bgr, masks, scores=None, alpha=0.5, outline=True):
+def overlay(bgr, masks, ids=None, scores=None, alpha=0.5, outline=True):
+    """Color each mask by its ID (persistent -> stable color). If ids is None,
+    falls back to list index. Labels show '#id' (+ score if given)."""
     out = bgr.copy()
     for j, m in enumerate(masks):
-        color = color_for(j)
+        cid = ids[j] if ids is not None else j
+        color = color_for(cid)
         layer = np.zeros_like(out)
         layer[m] = color
         out = cv2.addWeighted(out, 1.0, layer, alpha, 0.0)
@@ -88,14 +145,14 @@ def overlay(bgr, masks, scores=None, alpha=0.5, outline=True):
                                        cv2.CHAIN_APPROX_SIMPLE)
             cv2.drawContours(out, cont, -1, (0, 0, 0), 3)
             cv2.drawContours(out, cont, -1, color, 2)
-        if scores is not None:
-            ys, xs = np.where(m)
-            if len(xs):
-                x0, y0 = int(xs.mean()) - 18, int(ys.mean())
-                cv2.putText(out, f"{scores[j]:.2f}", (x0, y0), cv2.FONT_HERSHEY_SIMPLEX,
-                            0.55, (0, 0, 0), 3, cv2.LINE_AA)
-                cv2.putText(out, f"{scores[j]:.2f}", (x0, y0), cv2.FONT_HERSHEY_SIMPLEX,
-                            0.55, color, 1, cv2.LINE_AA)
+        ys, xs = np.where(m)
+        if len(xs):
+            lab = f"#{cid}" + (f" {scores[j]:.2f}" if scores is not None else "")
+            x0, y0 = int(xs.mean()) - 18, int(ys.mean())
+            cv2.putText(out, lab, (x0, y0), cv2.FONT_HERSHEY_SIMPLEX, 0.55,
+                        (0, 0, 0), 3, cv2.LINE_AA)
+            cv2.putText(out, lab, (x0, y0), cv2.FONT_HERSHEY_SIMPLEX, 0.55,
+                        color, 1, cv2.LINE_AA)
     return out
 
 
@@ -145,6 +202,11 @@ def main() -> None:
     ap.add_argument("--mask-thresh", type=float, default=0.5)
     ap.add_argument("--min-area", type=int, default=100)
     ap.add_argument("--alpha", type=float, default=0.5)
+    ap.add_argument("--track-iou", type=float, default=0.3,
+                    help="min IoU to link a detection to an existing track")
+    ap.add_argument("--track-max-age", type=int, default=10,
+                    help="frames a track survives unmatched (re-acquires same color "
+                         "after a brief occlusion)")
     ap.add_argument("--pred-only", action="store_true", help="only the PRED panel (no GT)")
     ap.add_argument("--fps", type=float, default=15.0, help="output video fps")
     ap.add_argument("--stride", type=int, default=1)
@@ -193,6 +255,7 @@ def main() -> None:
     panel_w = W if args.pred_only else 2 * W
     writer = make_writer(args.output, panel_w, H, args.fps)
 
+    tracker = Tracker(iou_thresh=args.track_iou, max_age=args.track_max_age)
     done = 0
     with torch.inference_mode():
         for n, i in enumerate(frame_ids):
@@ -207,19 +270,24 @@ def main() -> None:
                                           mask_thresh=args.mask_thresh, min_area=args.min_area)
             pred_masks = [d["mask"].cpu().numpy() for d in insts]
             pred_scores = [float(d["score"]) for d in insts]
+            pred_ids = tracker.update(pred_masks)            # persistent color per person
 
             base = denorm(sample["image"])
-            left = overlay(base, pred_masks, pred_scores, alpha=args.alpha)
-            left = banner(left, f"PRED NMS ({len(pred_masks)})")
+            left = overlay(base, pred_masks, ids=pred_ids, scores=pred_scores, alpha=args.alpha)
+            left = banner(left, f"PRED tracked ({len(pred_masks)})")
 
             if args.pred_only:
                 canvas = left
             else:
                 gt = sample["targets"]["masks"]
-                gt_masks = [(gt[k] > 0.5).cpu().numpy() for k in range(gt.shape[0])] \
-                    if gt.numel() else []
-                right = overlay(base, gt_masks, None, alpha=args.alpha)
-                right = banner(right, f"GT ({len(gt_masks)})")
+                gt_tids = sample["targets"]["track_ids"]
+                if gt.numel():
+                    gt_masks = [(gt[k] > 0.5).cpu().numpy() for k in range(gt.shape[0])]
+                    gt_ids = [int(gt_tids[k]) for k in range(gt.shape[0])]   # true identity
+                else:
+                    gt_masks, gt_ids = [], []
+                right = overlay(base, gt_masks, ids=gt_ids, scores=None, alpha=args.alpha)
+                right = banner(right, f"GT ids ({len(gt_masks)})")
                 canvas = np.concatenate([left, right], axis=1)
 
             writer.write(canvas)
