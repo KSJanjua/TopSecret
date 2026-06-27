@@ -1,0 +1,1 @@
+python run_pipeline.py --data-root gid_custom --out runs
