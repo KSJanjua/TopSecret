@@ -1,43 +1,14 @@
-import os
-import ssl
-import warnings
-
-# ==========================================================
-# FORCE ALL PYTHON NETWORKING (HTTPX / HTTPCORE) TO IGNORE SSL
-# ==========================================================
-try:
-    ssl._create_default_https_context = ssl._create_unverified_context
-except AttributeError:
-    pass
-
-orig_create_default_context = ssl.create_default_context
-def unverified_context(*args, **kwargs):
-    context = orig_create_default_context(*args, **kwargs)
-    context.check_hostname = False
-    context.verify_mode = ssl.CERT_NONE
-    return context
-ssl.create_default_context = unverified_context
-# ==========================================================
-
-from huggingface_hub import snapshot_download
-
-# Clean up warnings
-warnings.filterwarnings("ignore", category=UserWarning)
-
-# Paths configuration
-os.environ["HF_HOME"] = r"\\107.122.148.245\Storage5\BestMoments\Datasets\ViPE\hf_cache"
-network_path = r"\\107.122.148.245\Storage5\BestMoments\Datasets\ViPE"
-
-print("Connecting to Hugging Face and starting the 3.52 TB download...")
-print("Core SSL Engine validation successfully bypassed.")
-
-try:
-    snapshot_download(
-        repo_id="nvidia/vipe-dynpose-100kpp",
-        repo_type="dataset",
-        local_dir=network_path,
-        max_workers=8
-    )
-    print("\nSuccess! The entire dataset has been downloaded to your network storage.")
-except Exception as e:
-    print(f"\nAn error occurred during download: {e}")
+1. One-Month Progress / Key Contributions
+Adapted the InstanceDepth framework to a custom RGB-D dataset by creating a GID-equivalent dataset pipeline and annotations.
+Reimplemented and audited the repository to improve paper compliance, modularity, and training stability.
+Improved Phase 2 instance segmentation, achieving better instance separation and mask quality across most scenes (current validation: ___).
+Completed multiple training runs and TensorBoard-based evaluations to identify and resolve implementation issues.
+2. Current Status / Challenges
+Current Status: Phase 1 and Phase 2 are functional; Phase 2 shows improved instance masks and tracking consistency. Phase 3 refinement is implemented but requires further optimization.
+Challenges: Phase 3 training loss is unstable, and refined depth quality is below the Phase 1 baseline. Highly occluded instances and boundary sharpness remain challenging.
+Support Required: Validation of the proposed refinement strategy and feedback on the planned boundary-aware loss formulation (if required).
+3. Month 2 Plan & Deliverables
+Develop and integrate a boundary-aware loss and additional instance-aware refinement losses to improve occlusion boundaries and depth consistency.
+Stabilize Phase 3 training and evaluate the proposed refinements.
+Perform quantitative evaluation (e.g., Abs Rel: ___, RMSE: ___, δ₁: ___, Instance IoU/AP: ___) and qualitative comparisons against the baseline.
+Deliver a complete research-grade implementation with final experiments, analysis, and documentation.
