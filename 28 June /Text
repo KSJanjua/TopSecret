@@ -1,14 +1,7 @@
-1. One-Month Progress / Key Contributions
-Adapted the InstanceDepth framework to a custom RGB-D dataset by creating a GID-equivalent dataset pipeline and annotations.
-Reimplemented and audited the repository to improve paper compliance, modularity, and training stability.
-Improved Phase 2 instance segmentation, achieving better instance separation and mask quality across most scenes (current validation: ___).
-Completed multiple training runs and TensorBoard-based evaluations to identify and resolve implementation issues.
-2. Current Status / Challenges
-Current Status: Phase 1 and Phase 2 are functional; Phase 2 shows improved instance masks and tracking consistency. Phase 3 refinement is implemented but requires further optimization.
-Challenges: Phase 3 training loss is unstable, and refined depth quality is below the Phase 1 baseline. Highly occluded instances and boundary sharpness remain challenging.
-Support Required: Validation of the proposed refinement strategy and feedback on the planned boundary-aware loss formulation (if required).
-3. Month 2 Plan & Deliverables
-Develop and integrate a boundary-aware loss and additional instance-aware refinement losses to improve occlusion boundaries and depth consistency.
-Stabilize Phase 3 training and evaluate the proposed refinements.
+Month 2 Plan & Deliverables
+Design and integrate a boundary-aware loss and additional instance-aware refinement strategies to improve depth discontinuities, occlusion reasoning, and per-instance depth consistency.
+Optimize Phase 3 training to produce geometrically consistent, occlusion-correct, and temporally stable per-instance depth maps from monocular RGB videos.
+Improve depth boundary sharpness and instance-aware refinement while preserving alignment with the original InstanceDepth framework.
+Explore the feasibility of using the VIPeR dataset to construct a GID-like dataset and evaluate whether it provides better training performance and generalization than the current custom dataset.
 Perform quantitative evaluation (e.g., Abs Rel: ___, RMSE: ___, δ₁: ___, Instance IoU/AP: ___) and qualitative comparisons against the baseline.
-Deliver a complete research-grade implementation with final experiments, analysis, and documentation.
+Deliver a validated research-grade implementation with final experiments, comparative analysis, and documentation.
