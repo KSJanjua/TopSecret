@@ -1,23 +1,30 @@
 import os
+import warnings
 from huggingface_hub import snapshot_download
 
-# 1. Directing the cache to your network storage so your laptop C: drive doesn't fill up
-os.environ["HF_HOME"] = r"\\107.122.148\Storage5\BestMoments\Datasets\ViPE\hf_cache"
+# 1. Ignore the deprecated symlink warnings to keep your console clean
+warnings.filterwarnings("ignore", category=UserWarning)
 
-# 2. Your exact destination folder
-network_path = r"\\107.122.148\Storage5\BestMoments\Datasets\ViPE"
+# 2. FIX THE SSL ERROR: Bypass the network certificate check
+os.environ["HF_HUB_DISABLE_SSL_VERIFY"] = "1"
+
+# 3. Direct the cache to your network storage so your local drive stays completely empty
+os.environ["HF_HOME"] = r"\\107.122.148.245\Storage5\BestMoments\Datasets\ViPE\hf_cache"
+
+# 4. Your exact network destination folder
+network_path = r"\\107.122.148.245\Storage5\BestMoments\Datasets\ViPE"
 
 print("Connecting to Hugging Face and starting the 3.52 TB download...")
-print("This will take a long time. Do not close this window.")
+print("SSL Verification disabled to bypass network restrictions.")
+print("This will take a long time depending on your network speed. Do not close this window.\n")
 
-# 3. Triggering the download bypasses the broken CLI entry point
-snapshot_download(
-    repo_id="nvidia/vipe-dynpose-100kpp",
-    repo_type="dataset",
-    local_dir=network_path,
-    local_dir_use_symlinks=False,  # Essential for network storage compatibility
-    max_workers=8                  # Downloads multiple files at once to maximize network speed
-)
-
-print("Success! The entire dataset has been downloaded to your network storage.")
-
+try:
+    snapshot_download(
+        repo_id="nvidia/vipe-dynpose-100kpp",
+        repo_type="dataset",
+        local_dir=network_path,
+        max_workers=8  # Uses 8 parallel download streams for maximum network speeds
+    )
+    print("\nSuccess! The entire dataset has been downloaded to your network storage.")
+except Exception as e:
+    print(f"\nAn error occurred during download: {e}")
