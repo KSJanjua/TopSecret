@@ -1,1 +1,23 @@
+import os
+from huggingface_hub import snapshot_download
+
+# 1. Directing the cache to your network storage so your laptop C: drive doesn't fill up
+os.environ["HF_HOME"] = r"\\107.122.148\Storage5\BestMoments\Datasets\ViPE\hf_cache"
+
+# 2. Your exact destination folder
+network_path = r"\\107.122.148\Storage5\BestMoments\Datasets\ViPE"
+
+print("Connecting to Hugging Face and starting the 3.52 TB download...")
+print("This will take a long time. Do not close this window.")
+
+# 3. Triggering the download bypasses the broken CLI entry point
+snapshot_download(
+    repo_id="nvidia/vipe-dynpose-100kpp",
+    repo_type="dataset",
+    local_dir=network_path,
+    local_dir_use_symlinks=False,  # Essential for network storage compatibility
+    max_workers=8                  # Downloads multiple files at once to maximize network speed
+)
+
+print("Success! The entire dataset has been downloaded to your network storage.")
 
